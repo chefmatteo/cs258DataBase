@@ -382,9 +382,9 @@ public class GigTester {
         
         try {
             // Get ticket count before purchase
-            String sql = "SELECT COUNT(*) as count FROM TICKET WHERE gigid = ?";
+            String countSql = "SELECT COUNT(*) as count FROM TICKET WHERE gigid = ?";
             int ticketCountBefore = 0;
-            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            try (PreparedStatement stmt = conn.prepareStatement(countSql)) {
                 stmt.setInt(1, gigid);
                 try (ResultSet rs = stmt.executeQuery()) {
                     if (rs.next()) {
@@ -394,9 +394,9 @@ public class GigTester {
             }
             
             // Get expected ticket price from GIG_TICKET
-            sql = "SELECT price FROM GIG_TICKET WHERE gigid = ? AND pricetype = ?";
+            String priceSql = "SELECT price FROM GIG_TICKET WHERE gigid = ? AND pricetype = ?";
             int expectedPrice = -1;
-            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            try (PreparedStatement stmt = conn.prepareStatement(priceSql)) {
                 stmt.setInt(1, gigid);
                 stmt.setString(2, ticketType);
                 try (ResultSet rs = stmt.executeQuery()) {
@@ -410,9 +410,9 @@ public class GigTester {
             }
             
             // Verify gig exists and is active
-            sql = "SELECT gigstatus FROM GIG WHERE gigid = ?";
+            String statusSql = "SELECT gigstatus FROM GIG WHERE gigid = ?";
             String gigStatus = null;
-            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            try (PreparedStatement stmt = conn.prepareStatement(statusSql)) {
                 stmt.setInt(1, gigid);
                 try (ResultSet rs = stmt.executeQuery()) {
                     if (rs.next()) {
@@ -438,7 +438,7 @@ public class GigTester {
             
             // Get ticket count after purchase
             int ticketCountAfter = 0;
-            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            try (PreparedStatement stmt = conn.prepareStatement(countSql)) {
                 stmt.setInt(1, gigid);
                 try (ResultSet rs = stmt.executeQuery()) {
                     if (rs.next()) {
@@ -456,8 +456,8 @@ public class GigTester {
             }
             
             // Verify the new ticket details
-            sql = "SELECT customername, customeremail, pricetype, cost FROM TICKET WHERE gigid = ? AND customername = ? AND customeremail = ?";
-            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            String ticketSql = "SELECT customername, customeremail, pricetype, cost FROM TICKET WHERE gigid = ? AND customername = ? AND customeremail = ?";
+            try (PreparedStatement stmt = conn.prepareStatement(ticketSql)) {
                 stmt.setInt(1, gigid);
                 stmt.setString(2, name);
                 stmt.setString(3, email);
