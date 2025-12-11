@@ -1,6 +1,9 @@
 import java.util.Date;
 import java.sql.SQLException;
 import java.text.SimpleDateFormat;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 
 import java.util.Random;
 import java.util.GregorianCalendar;
@@ -88,6 +91,15 @@ public class GigTester {
     }
     
     public static boolean testTask2(){
+        Connection conn = GigSystem.getSocketConnection();
+        if (conn == null) {
+            System.err.println("Failed to get database connection");
+            return false;
+        }
+        
+        // Get the maximum gigid before creating new gig (to find the new one later)
+        int maxGigIdBefore = getMaxGigId(conn);
+        
         LocalDateTime[] onDates = new LocalDateTime[3];
         onDates[0] = LocalDateTime.of(2021,java.time.Month.NOVEMBER,02,20,00);
         onDates[1] = LocalDateTime.of(2021,java.time.Month.NOVEMBER,02,20,35);
@@ -97,33 +109,216 @@ public class GigTester {
         apd[1] = new ActPerformanceDetails(4, 30000, onDates[1], 40);
         apd[2] = new ActPerformanceDetails(6, 10000, onDates[2], 20);
 
+        // Call task2 to create the gig
+        GigSystem.task2(conn, venues[3], "The November Party", onDates[0], 40, apd);
         
-
-        GigSystem.task2(GigSystem.getSocketConnection(),venues[3],"The November Party",onDates[0],40,apd);
-        System.out.println("Should test task2 - you need to implement the test");
-        return false;
-        //You should put some test code here to read the state of the database after calling task 2 and check it is what you expected
-        //You could also call testTask1 here to check the schedule matches what you think it should
+        try {
+            // Get the new gigid (should be maxGigIdBefore + 1 if successful)
+            int maxGigIdAfter = getMaxGigId(conn);
+            
+            // Verify a new gig was created
+            if (maxGigIdAfter <= maxGigIdBefore) {
+                System.err.println("Test failed: No new gig was created");
+                return false;
+            }
+            
+            int newGigId = maxGigIdAfter;
+            
+            // Verify the gig details
+            String sql = "SELECT gigtitle, gigdatetime, gigstatus FROM GIG WHERE gigid = ?";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setInt(1, newGigId);
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (!rs.next()) {
+                        System.err.println("Test failed: Gig was not found in database");
+                        return false;
+                    }
+                    String title = rs.getString("gigtitle");
+                    if (!"The November Party".equals(title)) {
+                        System.err.println("Test failed: Gig title mismatch. Expected 'The November Party', got '" + title + "'");
+                        return false;
+                    }
+                    String status = rs.getString("gigstatus");
+                    if (!"G".equals(status)) {
+                        System.err.println("Test failed: Gig status should be 'G', got '" + status + "'");
+                        return false;
+                    }
+                }
+            }
+            
+            // Verify ACT_GIG records
+            sql = "SELECT COUNT(*) as count FROM ACT_GIG WHERE gigid = ?";
+            int actCount = 0;
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setInt(1, newGigId);
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        actCount = rs.getInt("count");
+                    }
+                }
+            }
+            if (actCount != 3) {
+                System.err.println("Test failed: Expected 3 acts, got " + actCount);
+                return false;
+            }
+            
+            // Verify ACT_GIG records have correct act IDs and fees
+            sql = "SELECT actid, actgigfee FROM ACT_GIG WHERE gigid = ? ORDER BY ontime";
+            int[] expectedActIds = {3, 4, 6};
+            int[] expectedFees = {20000, 30000, 10000};
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setInt(1, newGigId);
+                try (ResultSet rs = stmt.executeQuery()) {
+                    int idx = 0;
+                    while (rs.next() && idx < 3) {
+                        int actId = rs.getInt("actid");
+                        int fee = rs.getInt("actgigfee");
+                        if (actId != expectedActIds[idx]) {
+                            System.err.println("Test failed: Act " + (idx+1) + " ID mismatch. Expected " + expectedActIds[idx] + ", got " + actId);
+                            return false;
+                        }
+                        if (fee != expectedFees[idx]) {
+                            System.err.println("Test failed: Act " + (idx+1) + " fee mismatch. Expected " + expectedFees[idx] + ", got " + fee);
+                            return false;
+                        }
+                        idx++;
+                    }
+                }
+            }
+            
+            // Verify GIG_TICKET record
+            sql = "SELECT price FROM GIG_TICKET WHERE gigid = ? AND pricetype = 'A'";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setInt(1, newGigId);
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (!rs.next()) {
+                        System.err.println("Test failed: GIG_TICKET record not found");
+                        return false;
+                    }
+                    int price = rs.getInt("price");
+                    if (price != 40) {
+                        System.err.println("Test failed: Expected ticket price 40, got " + price);
+                        return false;
+                    }
+                }
+            }
+            
+            // Verify schedule using task1
+            String[][] schedule = GigSystem.task1(conn, newGigId);
+            if (schedule == null || schedule.length != 3) {
+                System.err.println("Test failed: Schedule should have 3 acts, got " + (schedule == null ? "null" : schedule.length));
+                return false;
+            }
+            
+            // Verify schedule times match expected values
+            // Act 1: 20:00, duration 30 -> ends 20:30
+            // Act 2: 20:35, duration 40 -> ends 21:15
+            // Act 3: 21:20, duration 20 -> ends 21:40
+            String[] expectedOnTimes = {"20:00", "20:35", "21:20"};
+            String[] expectedOffTimes = {"20:30", "21:15", "21:40"};
+            
+            for (int i = 0; i < 3; i++) {
+                if (!expectedOnTimes[i].equals(schedule[i][1])) {
+                    System.err.println("Test failed: Act " + (i+1) + " ontime mismatch. Expected '" + expectedOnTimes[i] + "', got '" + schedule[i][1] + "'");
+                    return false;
+                }
+                if (!expectedOffTimes[i].equals(schedule[i][2])) {
+                    System.err.println("Test failed: Act " + (i+1) + " offtime mismatch. Expected '" + expectedOffTimes[i] + "', got '" + schedule[i][2] + "'");
+                    return false;
+                }
+            }
+            
+            System.out.println("Test passed: Gig created successfully with correct schedule");
+            return true;
+            
+        } catch (SQLException e) {
+            System.err.println("Test failed with SQLException: " + e.getMessage());
+            e.printStackTrace();
+            return false;
+        }
+    }
+    
+    // Helper method to get maximum gigid
+    private static int getMaxGigId(Connection conn) {
+        try {
+            String sql = "SELECT COALESCE(MAX(gigid), 0) as maxid FROM GIG";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        return rs.getInt("maxid");
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return 0;
     }
 
     //This method isn't called by anywhere - you can adapt it if you like
     public static boolean testTask2Invalid(){
+        Connection conn = GigSystem.getSocketConnection();
+        if (conn == null) {
+            System.err.println("Failed to get database connection");
+            return false;
+        }
+        
+        // Get the maximum gigid before attempting to create invalid gig
+        int maxGigIdBefore = getMaxGigId(conn);
+        
         LocalDateTime[] onDates = new LocalDateTime[3];
         onDates[0] = LocalDateTime.of(2021,java.time.Month.NOVEMBER,02,20,00);
         onDates[1] = LocalDateTime.of(2021,java.time.Month.NOVEMBER,02,20,35);
-        //Nothing should be added, because there is a gap of more than 20 minutes between the second act and the third act
+        //Nothing should be added, because there is a gap of more than 30 minutes between the second act and the third act
+        // Act 1 ends at 20:30, Act 2 starts at 20:35 (5 min gap, OK)
+        // Act 2 ends at 21:15, Act 3 starts at 22:20 (65 min gap - violates Business Rule 10: intervals must be 10-30 minutes)
         onDates[2] = LocalDateTime.of(2021,java.time.Month.NOVEMBER,02,22,20);
         ActPerformanceDetails[] apd = new ActPerformanceDetails[3];
         apd[0] = new ActPerformanceDetails(3, 20000, onDates[0], 30);
         apd[1] = new ActPerformanceDetails(4, 30000, onDates[1], 40);
         apd[2] = new ActPerformanceDetails(6, 10000, onDates[2], 20);
 
+        // Call task2 - this should fail and not create a gig
+        GigSystem.task2(conn, venues[3], "The November Party Invalid", onDates[0], 40, apd);
         
-        GigSystem.task2(GigSystem.getSocketConnection(),venues[3],"The November Party", onDates[0],40,apd);
-        System.out.println("Should test task2Invalid - you need to implement the test");
-        return false;
-        //You should put some test code here to read the state of the database after calling task 2 and check it is what you expected
-        //You could also call testTask1 here to check the schedule matches what you think it should
+        try {
+            // Get the maximum gigid after attempting to create invalid gig
+            int maxGigIdAfter = getMaxGigId(conn);
+            
+            // Verify NO new gig was created (gigid should be the same)
+            if (maxGigIdAfter > maxGigIdBefore) {
+                System.err.println("Test failed: A new gig was created even though it should have been rejected");
+                // Clean up: delete the incorrectly created gig
+                String deleteSql = "DELETE FROM GIG WHERE gigid = ?";
+                try (PreparedStatement stmt = conn.prepareStatement(deleteSql)) {
+                    stmt.setInt(1, maxGigIdAfter);
+                    stmt.executeUpdate();
+                }
+                return false;
+            }
+            
+            // Verify the invalid gig title doesn't exist
+            String sql = "SELECT COUNT(*) as count FROM GIG WHERE gigtitle = 'The November Party Invalid'";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        int count = rs.getInt("count");
+                        if (count > 0) {
+                            System.err.println("Test failed: Invalid gig was created in database");
+                            return false;
+                        }
+                    }
+                }
+            }
+            
+            System.out.println("Test passed: Invalid gig was correctly rejected");
+            return true;
+            
+        } catch (SQLException e) {
+            System.err.println("Test failed with SQLException: " + e.getMessage());
+            e.printStackTrace();
+            return false;
+        }
     }
 
     public static boolean testTask3(){

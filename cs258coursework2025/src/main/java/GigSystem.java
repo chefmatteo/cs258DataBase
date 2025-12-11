@@ -34,6 +34,7 @@ public class GigSystem {
             System.out.println("________GigSystem________");
             System.out.println("_________________________");
             System.out.println("1: View Gig Schedule");
+            System.out.println("2: Create New Gig");
             System.out.println("q: Quit");
 
             String menuChoice = readEntry("Please choose an option: ");
@@ -71,6 +72,44 @@ public class GigSystem {
                     break;
 
                 case '2':
+                    // Task 2: Create New Gig
+                    try {
+                        String venueName = readEntry("Enter venue name: ");
+                        String gigTitle = readEntry("Enter gig title: ");
+                        String gigDateInput = readEntry("Enter gig date and time (YYYY-MM-DD HH:MM): ");
+                        String ticketPriceInput = readEntry("Enter adult ticket price: ");
+                        String numActsInput = readEntry("Enter number of acts: ");
+                        
+                        // Parse gig start time
+                        LocalDateTime gigStart = LocalDateTime.parse(gigDateInput.replace(" ", "T"));
+                        int adultTicketPrice = Integer.parseInt(ticketPriceInput);
+                        int numActs = Integer.parseInt(numActsInput);
+                        
+                        // Read act details
+                        ActPerformanceDetails[] actDetails = new ActPerformanceDetails[numActs];
+                        for (int i = 0; i < numActs; i++) {
+                            System.out.println("\nAct " + (i + 1) + ":");
+                            String actIdInput = readEntry("  Act ID: ");
+                            String feeInput = readEntry("  Fee: ");
+                            String actTimeInput = readEntry("  Start time (YYYY-MM-DD HH:MM): ");
+                            String durationInput = readEntry("  Duration (minutes): ");
+                            
+                            int actId = Integer.parseInt(actIdInput);
+                            int fee = Integer.parseInt(feeInput);
+                            LocalDateTime actTime = LocalDateTime.parse(actTimeInput.replace(" ", "T"));
+                            int duration = Integer.parseInt(durationInput);
+                            
+                            actDetails[i] = new ActPerformanceDetails(actId, fee, actTime, duration);
+                        }
+                        
+                        // Call task2
+                        task2(conn, venueName, gigTitle, gigStart, adultTicketPrice, actDetails);
+                        System.out.println("Gig creation attempted. Check database or use option 1 to view schedule.");
+                        
+                    } catch (Exception e) {
+                        System.out.println("Error: " + e.getMessage());
+                        e.printStackTrace();
+                    }
                     break;
                 case '3':
                     break;
