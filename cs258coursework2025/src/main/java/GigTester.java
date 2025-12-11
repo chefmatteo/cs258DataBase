@@ -7,6 +7,8 @@ import java.sql.ResultSet;
 
 import java.util.Random;
 import java.util.GregorianCalendar;
+import java.util.List;
+import java.util.ArrayList;
 
 import java.time.LocalDateTime;
 public class GigTester {
@@ -102,23 +104,66 @@ public class GigTester {
         
         LocalDateTime[] onDates = new LocalDateTime[3];
         onDates[0] = LocalDateTime.of(2021,java.time.Month.NOVEMBER,02,20,00);
-        onDates[1] = LocalDateTime.of(2021,java.time.Month.NOVEMBER,02,20,35);
-        onDates[2] = LocalDateTime.of(2021,java.time.Month.NOVEMBER,02,21,20);
+        // Act 1 ends at 20:30, so Act 2 must start at 20:40 (10 min gap) or later, but within 30 min
+        // Using 20:40 for a 10-minute gap (minimum allowed)
+        onDates[1] = LocalDateTime.of(2021,java.time.Month.NOVEMBER,02,20,40);
+        // Act 2 ends at 21:20, so Act 3 must start at 21:30 (10 min gap) or later
+        // Using 21:30 for a 10-minute gap
+        onDates[2] = LocalDateTime.of(2021,java.time.Month.NOVEMBER,02,21,30);
         ActPerformanceDetails[] apd = new ActPerformanceDetails[3];
         apd[0] = new ActPerformanceDetails(3, 20000, onDates[0], 30);
         apd[1] = new ActPerformanceDetails(4, 30000, onDates[1], 40);
         apd[2] = new ActPerformanceDetails(6, 10000, onDates[2], 20);
 
         // Call task2 to create the gig
+        System.out.println("Attempting to create gig at venue: " + venues[3]);
+        System.out.println("Act 1: ID=" + apd[0].getActID() + ", starts=" + onDates[0] + ", duration=" + apd[0].getDuration());
+        System.out.println("Act 2: ID=" + apd[1].getActID() + ", starts=" + onDates[1] + ", duration=" + apd[1].getDuration());
+        System.out.println("Act 3: ID=" + apd[2].getActID() + ", starts=" + onDates[2] + ", duration=" + apd[2].getDuration());
+        
         GigSystem.task2(conn, venues[3], "The November Party", onDates[0], 40, apd);
         
         try {
             // Get the new gigid (should be maxGigIdBefore + 1 if successful)
             int maxGigIdAfter = getMaxGigId(conn);
             
+            System.out.println("Max gig ID before: " + maxGigIdBefore);
+            System.out.println("Max gig ID after: " + maxGigIdAfter);
+            
             // Verify a new gig was created
             if (maxGigIdAfter <= maxGigIdBefore) {
                 System.err.println("Test failed: No new gig was created");
+                System.err.println("This might be because:");
+                System.err.println("  1. Business rules were violated (check interval durations, overlaps, etc.)");
+                System.err.println("  2. Venue does not exist: " + venues[3]);
+                System.err.println("  3. Acts do not exist (IDs: 3, 4, 6)");
+                System.err.println("  4. Conflicts with existing gigs");
+                
+                // Check if venue exists
+                String checkVenue = "SELECT COUNT(*) as count FROM VENUE WHERE venuename = ?";
+                try (PreparedStatement stmt = conn.prepareStatement(checkVenue)) {
+                    stmt.setString(1, venues[3]);
+                    try (ResultSet rs = stmt.executeQuery()) {
+                        if (rs.next() && rs.getInt("count") == 0) {
+                            System.err.println("  -> Venue '" + venues[3] + "' does not exist in database");
+                        }
+                    }
+                }
+                
+                // Check if acts exist
+                String checkActs = "SELECT actid FROM ACT WHERE actid IN (3, 4, 6) ORDER BY actid";
+                try (PreparedStatement stmt = conn.prepareStatement(checkActs)) {
+                    try (ResultSet rs = stmt.executeQuery()) {
+                        List<Integer> existingActs = new ArrayList<>();
+                        while (rs.next()) {
+                            existingActs.add(rs.getInt("actid"));
+                        }
+                        if (existingActs.size() < 3) {
+                            System.err.println("  -> Some acts are missing. Found: " + existingActs);
+                        }
+                    }
+                }
+                
                 return false;
             }
             
@@ -212,10 +257,10 @@ public class GigTester {
             
             // Verify schedule times match expected values
             // Act 1: 20:00, duration 30 -> ends 20:30
-            // Act 2: 20:35, duration 40 -> ends 21:15
-            // Act 3: 21:20, duration 20 -> ends 21:40
-            String[] expectedOnTimes = {"20:00", "20:35", "21:20"};
-            String[] expectedOffTimes = {"20:30", "21:15", "21:40"};
+            // Act 2: 20:40, duration 40 -> ends 21:20
+            // Act 3: 21:30, duration 20 -> ends 21:50
+            String[] expectedOnTimes = {"20:00", "20:40", "21:30"};
+            String[] expectedOffTimes = {"20:30", "21:20", "21:50"};
             
             for (int i = 0; i < 3; i++) {
                 if (!expectedOnTimes[i].equals(schedule[i][1])) {
