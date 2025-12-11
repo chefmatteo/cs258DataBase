@@ -44,7 +44,8 @@ public class GigTester {
                             System.out.println("Test 2 status: " + testTask2());
                             break;
                         case 3:
-                            System.out.println("Test 3 status: " + testTask3());
+                            System.out.println("Test 3 (valid) status: " + testTask3());
+                            System.out.println("Test 3 (invalid) status: " + testTask3Invalid());
                             break;
                         case 4:
                             System.out.println("Test 4 status: " + testTask4());
@@ -492,6 +493,225 @@ public class GigTester {
             }
             
             System.out.println("Test passed: Ticket purchased successfully with correct details");
+            return true;
+            
+        } catch (SQLException e) {
+            System.err.println("Test failed with SQLException: " + e.getMessage());
+            e.printStackTrace();
+            return false;
+        }
+    }
+
+    // Test Task 3 with invalid information
+    public static boolean testTask3Invalid(){
+        Connection conn = GigSystem.getSocketConnection();
+        if (conn == null) {
+            System.err.println("Failed to get database connection");
+            return false;
+        }
+        
+        try {
+            // Test Case 1: Invalid gig ID (gig doesn't exist)
+            System.out.println("Testing invalid gig ID...");
+            int invalidGigId = 99999;
+            String countSql = "SELECT COUNT(*) as count FROM TICKET WHERE gigid = ?";
+            int ticketCountBefore1 = 0;
+            try (PreparedStatement stmt = conn.prepareStatement(countSql)) {
+                stmt.setInt(1, invalidGigId);
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        ticketCountBefore1 = rs.getInt("count");
+                    }
+                }
+            }
+            
+            GigSystem.task3(conn, invalidGigId, "Test Customer", "test@example.com", "A");
+            
+            int ticketCountAfter1 = 0;
+            try (PreparedStatement stmt = conn.prepareStatement(countSql)) {
+                stmt.setInt(1, invalidGigId);
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        ticketCountAfter1 = rs.getInt("count");
+                    }
+                }
+            }
+            
+            if (ticketCountAfter1 != ticketCountBefore1) {
+                System.err.println("Test failed: Ticket was created for non-existent gig");
+                return false;
+            }
+            System.out.println("  ✓ Invalid gig ID correctly rejected");
+            
+            // Test Case 2: Invalid ticket type (ticket type doesn't exist for gig)
+            System.out.println("Testing invalid ticket type...");
+            int validGigId = 24; // Use a valid gig
+            String invalidTicketType = "Z"; // Ticket type that doesn't exist
+            
+            int ticketCountBefore2 = 0;
+            try (PreparedStatement stmt = conn.prepareStatement(countSql)) {
+                stmt.setInt(1, validGigId);
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        ticketCountBefore2 = rs.getInt("count");
+                    }
+                }
+            }
+            
+            GigSystem.task3(conn, validGigId, "Test Customer", "test@example.com", invalidTicketType);
+            
+            int ticketCountAfter2 = 0;
+            try (PreparedStatement stmt = conn.prepareStatement(countSql)) {
+                stmt.setInt(1, validGigId);
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        ticketCountAfter2 = rs.getInt("count");
+                    }
+                }
+            }
+            
+            if (ticketCountAfter2 != ticketCountBefore2) {
+                System.err.println("Test failed: Ticket was created with invalid ticket type");
+                return false;
+            }
+            System.out.println("  ✓ Invalid ticket type correctly rejected");
+            
+            // Test Case 3: Empty customer name
+            System.out.println("Testing empty customer name...");
+            int ticketCountBefore3 = 0;
+            try (PreparedStatement stmt = conn.prepareStatement(countSql)) {
+                stmt.setInt(1, validGigId);
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        ticketCountBefore3 = rs.getInt("count");
+                    }
+                }
+            }
+            
+            GigSystem.task3(conn, validGigId, "", "test@example.com", "A");
+            
+            int ticketCountAfter3 = 0;
+            try (PreparedStatement stmt = conn.prepareStatement(countSql)) {
+                stmt.setInt(1, validGigId);
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        ticketCountAfter3 = rs.getInt("count");
+                    }
+                }
+            }
+            
+            if (ticketCountAfter3 != ticketCountBefore3) {
+                System.err.println("Test failed: Ticket was created with empty customer name");
+                return false;
+            }
+            System.out.println("  ✓ Empty customer name correctly rejected");
+            
+            // Test Case 4: Empty email
+            System.out.println("Testing empty email...");
+            int ticketCountBefore4 = 0;
+            try (PreparedStatement stmt = conn.prepareStatement(countSql)) {
+                stmt.setInt(1, validGigId);
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        ticketCountBefore4 = rs.getInt("count");
+                    }
+                }
+            }
+            
+            GigSystem.task3(conn, validGigId, "Test Customer", "", "A");
+            
+            int ticketCountAfter4 = 0;
+            try (PreparedStatement stmt = conn.prepareStatement(countSql)) {
+                stmt.setInt(1, validGigId);
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        ticketCountAfter4 = rs.getInt("count");
+                    }
+                }
+            }
+            
+            if (ticketCountAfter4 != ticketCountBefore4) {
+                System.err.println("Test failed: Ticket was created with empty email");
+                return false;
+            }
+            System.out.println("  ✓ Empty email correctly rejected");
+            
+            // Test Case 5: Invalid ticket type format (not single character)
+            System.out.println("Testing invalid ticket type format...");
+            int ticketCountBefore5 = 0;
+            try (PreparedStatement stmt = conn.prepareStatement(countSql)) {
+                stmt.setInt(1, validGigId);
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        ticketCountBefore5 = rs.getInt("count");
+                    }
+                }
+            }
+            
+            GigSystem.task3(conn, validGigId, "Test Customer", "test@example.com", "AA"); // Invalid: not single character
+            
+            int ticketCountAfter5 = 0;
+            try (PreparedStatement stmt = conn.prepareStatement(countSql)) {
+                stmt.setInt(1, validGigId);
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        ticketCountAfter5 = rs.getInt("count");
+                    }
+                }
+            }
+            
+            if (ticketCountAfter5 != ticketCountBefore5) {
+                System.err.println("Test failed: Ticket was created with invalid ticket type format");
+                return false;
+            }
+            System.out.println("  ✓ Invalid ticket type format correctly rejected");
+            
+            // Test Case 6: Cancelled gig (if we can find one or create a cancelled gig scenario)
+            // Note: This test assumes there might be a cancelled gig, or we skip it if none exists
+            System.out.println("Testing cancelled gig...");
+            String cancelledGigSql = "SELECT gigid FROM GIG WHERE gigstatus = 'C' LIMIT 1";
+            Integer cancelledGigId = null;
+            try (PreparedStatement stmt = conn.prepareStatement(cancelledGigSql)) {
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        cancelledGigId = rs.getInt("gigid");
+                    }
+                }
+            }
+            
+            if (cancelledGigId != null) {
+                int ticketCountBefore6 = 0;
+                try (PreparedStatement stmt = conn.prepareStatement(countSql)) {
+                    stmt.setInt(1, cancelledGigId);
+                    try (ResultSet rs = stmt.executeQuery()) {
+                        if (rs.next()) {
+                            ticketCountBefore6 = rs.getInt("count");
+                        }
+                    }
+                }
+                
+                GigSystem.task3(conn, cancelledGigId, "Test Customer", "test@example.com", "A");
+                
+                int ticketCountAfter6 = 0;
+                try (PreparedStatement stmt = conn.prepareStatement(countSql)) {
+                    stmt.setInt(1, cancelledGigId);
+                    try (ResultSet rs = stmt.executeQuery()) {
+                        if (rs.next()) {
+                            ticketCountAfter6 = rs.getInt("count");
+                        }
+                    }
+                }
+                
+                if (ticketCountAfter6 != ticketCountBefore6) {
+                    System.err.println("Test failed: Ticket was created for cancelled gig");
+                    return false;
+                }
+                System.out.println("  ✓ Cancelled gig correctly rejected");
+            } else {
+                System.out.println("  ⚠ Skipped: No cancelled gig found in database");
+            }
+            
+            System.out.println("All invalid test cases passed!");
             return true;
             
         } catch (SQLException e) {
