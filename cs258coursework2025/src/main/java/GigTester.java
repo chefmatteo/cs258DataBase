@@ -369,16 +369,136 @@ public class GigTester {
     }
 
     public static boolean testTask3(){
+        Connection conn = GigSystem.getSocketConnection();
+        if (conn == null) {
+            System.err.println("Failed to get database connection");
+            return false;
+        }
+        
         int gigid = 24;
         String name = "B Simpson";
         String email = "bsimpson@testemail";
-
-        GigSystem.task3(GigSystem.getSocketConnection(), gigid, name, email,"A");
-
-        System.out.println("Should test task3 - you need to implement the test");
-        return false;
-        //You should put some test code here to read the state of the database after calling task 3 and check it is what you expected
-        //You could also call testTask1 here to check the scshedule matches what you think it should
+        String ticketType = "A";
+        
+        try {
+            // Get ticket count before purchase
+            String sql = "SELECT COUNT(*) as count FROM TICKET WHERE gigid = ?";
+            int ticketCountBefore = 0;
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setInt(1, gigid);
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        ticketCountBefore = rs.getInt("count");
+                    }
+                }
+            }
+            
+            // Get expected ticket price from GIG_TICKET
+            sql = "SELECT price FROM GIG_TICKET WHERE gigid = ? AND pricetype = ?";
+            int expectedPrice = -1;
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setInt(1, gigid);
+                stmt.setString(2, ticketType);
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        expectedPrice = rs.getInt("price");
+                    } else {
+                        System.err.println("Test failed: GIG_TICKET record not found for gig " + gigid + " and type " + ticketType);
+                        return false;
+                    }
+                }
+            }
+            
+            // Verify gig exists and is active
+            sql = "SELECT gigstatus FROM GIG WHERE gigid = ?";
+            String gigStatus = null;
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setInt(1, gigid);
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        gigStatus = rs.getString("gigstatus");
+                    } else {
+                        System.err.println("Test failed: Gig " + gigid + " does not exist");
+                        return false;
+                    }
+                }
+            }
+            
+            if (!"G".equals(gigStatus)) {
+                System.err.println("Test failed: Gig " + gigid + " is not active (status: " + gigStatus + ")");
+                return false;
+            }
+            
+            System.out.println("DEBUG: Ticket count before: " + ticketCountBefore);
+            System.out.println("DEBUG: Expected ticket price: " + expectedPrice);
+            System.out.println("DEBUG: Gig status: " + gigStatus);
+            
+            // Call task3 to purchase ticket
+            GigSystem.task3(conn, gigid, name, email, ticketType);
+            
+            // Get ticket count after purchase
+            int ticketCountAfter = 0;
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setInt(1, gigid);
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        ticketCountAfter = rs.getInt("count");
+                    }
+                }
+            }
+            
+            System.out.println("DEBUG: Ticket count after: " + ticketCountAfter);
+            
+            // Verify a new ticket was created
+            if (ticketCountAfter != ticketCountBefore + 1) {
+                System.err.println("Test failed: Expected ticket count " + (ticketCountBefore + 1) + ", got " + ticketCountAfter);
+                return false;
+            }
+            
+            // Verify the new ticket details
+            sql = "SELECT customername, customeremail, pricetype, cost FROM TICKET WHERE gigid = ? AND customername = ? AND customeremail = ?";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setInt(1, gigid);
+                stmt.setString(2, name);
+                stmt.setString(3, email);
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (!rs.next()) {
+                        System.err.println("Test failed: Ticket not found for customer " + name + " (" + email + ")");
+                        return false;
+                    }
+                    
+                    String ticketName = rs.getString("customername");
+                    String ticketEmail = rs.getString("customeremail");
+                    String ticketPriceType = rs.getString("pricetype");
+                    int ticketCost = rs.getInt("cost");
+                    
+                    if (!name.equals(ticketName)) {
+                        System.err.println("Test failed: Customer name mismatch. Expected '" + name + "', got '" + ticketName + "'");
+                        return false;
+                    }
+                    if (!email.equals(ticketEmail)) {
+                        System.err.println("Test failed: Customer email mismatch. Expected '" + email + "', got '" + ticketEmail + "'");
+                        return false;
+                    }
+                    if (!ticketType.equals(ticketPriceType)) {
+                        System.err.println("Test failed: Ticket type mismatch. Expected '" + ticketType + "', got '" + ticketPriceType + "'");
+                        return false;
+                    }
+                    if (expectedPrice != ticketCost) {
+                        System.err.println("Test failed: Ticket cost mismatch. Expected " + expectedPrice + ", got " + ticketCost);
+                        return false;
+                    }
+                }
+            }
+            
+            System.out.println("Test passed: Ticket purchased successfully with correct details");
+            return true;
+            
+        } catch (SQLException e) {
+            System.err.println("Test failed with SQLException: " + e.getMessage());
+            e.printStackTrace();
+            return false;
+        }
     }
 
     public static boolean testTask4(){
