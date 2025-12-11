@@ -424,28 +424,68 @@ public class GigSystem {
             LocalDateTime adjustedNextStart = firstAfter.onTime.minusMinutes(totalCancelledDuration);
             long gapMinutes;
             
+            // Get gig start time
+            String gigStartSql = "SELECT gigdatetime FROM GIG WHERE gigid = ?";
+            LocalDateTime gigStart = null;
+            try (PreparedStatement stmt = conn.prepareStatement(gigStartSql)) {
+                stmt.setInt(1, gigId);
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        gigStart = rs.getTimestamp("gigdatetime").toLocalDateTime();
+                    } else {
+                        return false; // Gig not found
+                    }
+                }
+            }
+            
             if (prevEnd != null) {
                 // There's a performance before the cancelled ones
                 gapMinutes = java.time.Duration.between(prevEnd, adjustedNextStart).toMinutes();
             } else {
-                // No performance before, check gap from gig start
+                // No performance before - cancelled act was the first act
+                // After cancellation, next act should start at gig start (Business Rule 11)
+                // But if adjusted start is before gig start, we need to check the actual gap
+                if (adjustedNextStart.isBefore(gigStart)) {
+                    // This shouldn't happen, but if it does, it's a violation
+                    return true;
+                } else if (adjustedNextStart.equals(gigStart)) {
+                    // Next act starts exactly at gig start - no interval, which violates Business Rule 10
+                    // (intervals must be 10-30 minutes, but 0 minutes is not allowed)
+                    return true; // Would violate interval rule
+                } else {
+                    // There's a gap from gig start to adjusted next start
+                    gapMinutes = java.time.Duration.between(gigStart, adjustedNextStart).toMinutes();
+                }
+            }
+            
+            // Check if gap violates Business Rule 10 (10-30 minutes)
+            // Note: gapMinutes can be 0, negative, or positive
+            if (gapMinutes < 10 || gapMinutes > 30) {
+                return true; // Would violate interval rule
+            }
+        } else {
+            // No performance after cancelled ones - this means cancelled act was the last act
+            // This should be caught by isHeadlineAct check, but if not, we should still check
+            // If there's a performance before, we need to check if removing the last act
+            // would leave a gap that violates rules
+            if (prevEnd != null) {
+                // There's a performance before, but nothing after
+                // After cancellation, the previous performance becomes the last one
+                // We need to check if the gig would still meet minimum duration (Business Rule 13)
                 String gigStartSql = "SELECT gigdatetime FROM GIG WHERE gigid = ?";
                 try (PreparedStatement stmt = conn.prepareStatement(gigStartSql)) {
                     stmt.setInt(1, gigId);
                     try (ResultSet rs = stmt.executeQuery()) {
                         if (rs.next()) {
                             LocalDateTime gigStart = rs.getTimestamp("gigdatetime").toLocalDateTime();
-                            gapMinutes = java.time.Duration.between(gigStart, adjustedNextStart).toMinutes();
-                        } else {
-                            return false; // Gig not found
+                            // Check if prevEnd is at least 60 minutes after gig start
+                            long gigDuration = java.time.Duration.between(gigStart, prevEnd).toMinutes();
+                            if (gigDuration < 60) {
+                                return true; // Would violate Business Rule 13 (minimum 60 minutes)
+                            }
                         }
                     }
                 }
-            }
-            
-            // Check if gap violates Business Rule 10 (10-30 minutes)
-            if (gapMinutes > 0 && (gapMinutes < 10 || gapMinutes > 30)) {
-                return true; // Would violate interval rule
             }
         }
         
@@ -837,7 +877,11 @@ public class GigSystem {
             boolean isHeadline = isHeadlineAct(conn, gigID, actId);
             
             // Step 6: Check if cancellation would violate interval rules
-            boolean wouldViolate = wouldViolateIntervalRules(conn, gigID, actId, totalCancelledDuration);
+            boolean wouldViolate = false;
+            if (!isHeadline) {
+                // Only check interval violations if not headline (headline always cancels gig)
+                wouldViolate = wouldViolateIntervalRules(conn, gigID, actId, totalCancelledDuration);
+            }
             
             // Step 7: Decide action based on conditions
             String[][] result;

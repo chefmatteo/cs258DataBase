@@ -722,19 +722,212 @@ public class GigTester {
     }
 
     public static boolean testTask4(){
+        Connection conn = GigSystem.getSocketConnection();
+        if (conn == null) {
+            System.err.println("Failed to get database connection");
+            return false;
+        }
+        
         int cancelGigID = 40;
         String actName = "Scalar Swift";
-        GigSystem.task4(GigSystem.getSocketConnection(),cancelGigID,actName);
-        System.out.println("Should test task4 - you need to implement the test");
-
-        //You should put some code here to read the state of the database after calling task 4 to confirm that the input gig has been cancelled
-
-        //For instance, if gigid 40 was to be cancelled in the main test data, the result should be:
-        // String[][] expectedEmails = {{"c2 c2","c2cc@example.com"},{"d3 d3","d3dd@example.com"}};
-
-        //In the case the gig is not cancelled, you can do something similar to testTask1
         
-        return false;
+        try {
+            // Check gig status before cancellation
+            String statusSql = "SELECT gigstatus FROM GIG WHERE gigid = ?";
+            String statusBefore = null;
+            try (PreparedStatement stmt = conn.prepareStatement(statusSql)) {
+                stmt.setInt(1, cancelGigID);
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        statusBefore = rs.getString("gigstatus");
+                    } else {
+                        System.err.println("Test failed: Gig " + cancelGigID + " does not exist");
+                        return false;
+                    }
+                }
+            }
+            
+            System.out.println("DEBUG: Gig status before: " + statusBefore);
+            
+            // Check if act exists in gig
+            String actIdSql = "SELECT actid FROM ACT WHERE actname = ?";
+            int actId = -1;
+            try (PreparedStatement stmt = conn.prepareStatement(actIdSql)) {
+                stmt.setString(1, actName);
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        actId = rs.getInt("actid");
+                    }
+                }
+            }
+            
+            if (actId == -1) {
+                System.err.println("Test failed: Act '" + actName + "' not found");
+                return false;
+            }
+            
+            System.out.println("DEBUG: Act ID for '" + actName + "': " + actId);
+            
+            // Check how many acts are in this gig
+            String countActsSql = "SELECT COUNT(DISTINCT actid) as total FROM ACT_GIG WHERE gigid = ?";
+            int totalActs = 0;
+            try (PreparedStatement stmt = conn.prepareStatement(countActsSql)) {
+                stmt.setInt(1, cancelGigID);
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        totalActs = rs.getInt("total");
+                    }
+                }
+            }
+            
+            System.out.println("DEBUG: Total distinct acts in gig: " + totalActs);
+            
+            // Determine if act is headline (will be checked after task4 based on result format)
+            boolean isHeadline = (totalActs == 1); // If only one act, it's definitely headline
+            
+            // Get ticket costs before cancellation
+            String ticketCostSql = "SELECT ticketid, cost FROM TICKET WHERE gigid = ?";
+            Map<Integer, Integer> ticketCostsBefore = new HashMap<>();
+            try (PreparedStatement stmt = conn.prepareStatement(ticketCostSql)) {
+                stmt.setInt(1, cancelGigID);
+                try (ResultSet rs = stmt.executeQuery()) {
+                    while (rs.next()) {
+                        ticketCostsBefore.put(rs.getInt("ticketid"), rs.getInt("cost"));
+                    }
+                }
+            }
+            
+            System.out.println("DEBUG: Tickets before: " + ticketCostsBefore.size());
+            
+            // Call task4
+            String[][] result = GigSystem.task4(conn, cancelGigID, actName);
+            
+            if (result == null) {
+                System.err.println("Test failed: task4 returned null");
+                return false;
+            }
+            
+            System.out.println("DEBUG: Result length: " + result.length);
+            if (result.length > 0) {
+                System.out.println("DEBUG: Result columns: " + result[0].length);
+            }
+            
+            // Check gig status after cancellation
+            String statusAfter = null;
+            try (PreparedStatement stmt = conn.prepareStatement(statusSql)) {
+                stmt.setInt(1, cancelGigID);
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        statusAfter = rs.getString("gigstatus");
+                    }
+                }
+            }
+            
+            System.out.println("DEBUG: Gig status after: " + statusAfter);
+            
+            // Determine if entire gig was cancelled based on status
+            boolean entireGigCancelled = "C".equals(statusAfter);
+            
+            if (entireGigCancelled) {
+                // Should cancel entire gig
+                if (!"C".equals(statusAfter)) {
+                    System.err.println("Test failed: Gig should be cancelled (status should be 'C'), got '" + statusAfter + "'");
+                    return false;
+                }
+                
+                // Check ticket costs are set to 0
+                String checkCostSql = "SELECT ticketid, cost FROM TICKET WHERE gigid = ?";
+                try (PreparedStatement stmt = conn.prepareStatement(checkCostSql)) {
+                    stmt.setInt(1, cancelGigID);
+                    try (ResultSet rs = stmt.executeQuery()) {
+                        while (rs.next()) {
+                            int ticketId = rs.getInt("ticketid");
+                            int cost = rs.getInt("cost");
+                            if (cost != 0) {
+                                System.err.println("Test failed: Ticket " + ticketId + " cost should be 0, got " + cost);
+                                return false;
+                            }
+                        }
+                    }
+                }
+                
+                // Verify result format: should be customer names and emails
+                if (result.length == 0) {
+                    System.out.println("DEBUG: No customers affected (gig had no tickets)");
+                    return true;
+                }
+                
+                if (result[0].length != 2) {
+                    System.err.println("Test failed: Result should have 2 columns (name, email), got " + result[0].length);
+                    return false;
+                }
+                
+                // Verify customers are ordered by name and distinct
+                String prevName = null;
+                for (int i = 0; i < result.length; i++) {
+                    String name = result[i][0];
+                    String email = result[i][1];
+                    
+                    if (name == null || email == null) {
+                        System.err.println("Test failed: Result row " + i + " has null values");
+                        return false;
+                    }
+                    
+                    // Check ordering (ascending by name)
+                    if (prevName != null && name.compareTo(prevName) < 0) {
+                        System.err.println("Test failed: Results not ordered by name. '" + prevName + "' should come before '" + name + "'");
+                        return false;
+                    }
+                    
+                    // Check for duplicates
+                    for (int j = i + 1; j < result.length; j++) {
+                        if (result[j][0].equals(name) && result[j][1].equals(email)) {
+                            System.err.println("Test failed: Duplicate customer found: " + name + ", " + email);
+                            return false;
+                        }
+                    }
+                    
+                    prevName = name;
+                }
+                
+                System.out.println("Test passed: Gig cancelled successfully, " + result.length + " customers affected");
+                return true;
+                
+            } else {
+                // Should only cancel act, not entire gig
+                if (!"G".equals(statusAfter)) {
+                    System.err.println("Test failed: Gig should still be active (status should be 'G'), got '" + statusAfter + "'");
+                    return false;
+                }
+                
+                // Verify result is lineup format (like task1)
+                if (result.length == 0) {
+                    System.out.println("DEBUG: No acts remaining after cancellation");
+                    return true;
+                }
+                
+                if (result[0].length != 3) {
+                    System.err.println("Test failed: Result should have 3 columns (actname, ontime, offtime), got " + result[0].length);
+                    return false;
+                }
+                
+                // Verify cancelled act is not in result
+                for (int i = 0; i < result.length; i++) {
+                    if (actName.equals(result[i][0])) {
+                        System.err.println("Test failed: Cancelled act '" + actName + "' still appears in lineup");
+                        return false;
+                    }
+                }
+                
+                System.out.println("Test passed: Act cancelled successfully, lineup updated");
+                return true;
+            }
+            
+        } catch (SQLException e) {
+            System.err.println("Test failed with SQLException: " + e.getMessage());
+            e.printStackTrace();
+            return false;
+        }
     }
 
     public static boolean testTask5(){
