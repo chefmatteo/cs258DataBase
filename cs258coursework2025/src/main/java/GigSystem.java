@@ -262,6 +262,270 @@ public class GigSystem {
             // If trigger raises exception (capacity exceeded, cost mismatch), it will propagate up
         }
     }
+    
+    // Helper method to get act ID by name
+    private static int getActIdByName(Connection conn, String actName) throws SQLException {
+        String sql = "SELECT actid FROM ACT WHERE actname = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, actName);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getInt("actid");
+                }
+            }
+        }
+        return -1; // Act not found
+    }
+    
+    // Helper class to store performance information
+    private static class PerformanceInfo {
+        int actId;
+        LocalDateTime onTime;
+        int duration;
+        LocalDateTime endTime;
+        
+        PerformanceInfo(int actId, LocalDateTime onTime, int duration) {
+            this.actId = actId;
+            this.onTime = onTime;
+            this.duration = duration;
+            this.endTime = onTime.plusMinutes(duration);
+        }
+    }
+    
+    // Helper method to get all performances for a gig, ordered by ontime
+    private static List<PerformanceInfo> getAllPerformances(Connection conn, int gigId) throws SQLException {
+        List<PerformanceInfo> performances = new ArrayList<>();
+        String sql = "SELECT actid, ontime, duration FROM ACT_GIG WHERE gigid = ? ORDER BY ontime";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setInt(1, gigId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    int actId = rs.getInt("actid");
+                    Timestamp ontimeTs = rs.getTimestamp("ontime");
+                    int duration = rs.getInt("duration");
+                    LocalDateTime onTime = ontimeTs.toLocalDateTime();
+                    performances.add(new PerformanceInfo(actId, onTime, duration));
+                }
+            }
+        }
+        return performances;
+    }
+    
+    // Helper method to check if act is headline act (final or only act)
+    private static boolean isHeadlineAct(Connection conn, int gigId, int actId) throws SQLException {
+        // Get all performances for this gig
+        List<PerformanceInfo> performances = getAllPerformances(conn, gigId);
+        
+        if (performances.isEmpty()) {
+            return false; // No performances
+        }
+        
+        // Check if this is the only act in the gig
+        boolean isOnlyAct = true;
+        for (PerformanceInfo perf : performances) {
+            if (perf.actId != actId) {
+                isOnlyAct = false;
+                break;
+            }
+        }
+        if (isOnlyAct) {
+            return true; // Only act is always headline
+        }
+        
+        // Find the latest end time (headline act is the one that finishes last)
+        LocalDateTime latestEndTime = performances.get(0).endTime;
+        int headlineActId = performances.get(0).actId;
+        
+        for (PerformanceInfo perf : performances) {
+            if (perf.endTime.isAfter(latestEndTime)) {
+                latestEndTime = perf.endTime;
+                headlineActId = perf.actId;
+            } else if (perf.endTime.equals(latestEndTime) && perf.actId == actId) {
+                // If multiple acts end at the same time and one is our act, it's headline
+                headlineActId = perf.actId;
+            }
+        }
+        
+        // Check if this act is the headline act
+        return headlineActId == actId;
+    }
+    
+    // Helper method to calculate total duration of cancelled performances
+    private static int getTotalCancelledDuration(Connection conn, int gigId, int actId) throws SQLException {
+        String sql = "SELECT SUM(duration) as total FROM ACT_GIG WHERE gigid = ? AND actid = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setInt(1, gigId);
+            stmt.setInt(2, actId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    int total = rs.getInt("total");
+                    return rs.wasNull() ? 0 : total;
+                }
+            }
+        }
+        return 0;
+    }
+    
+    // Helper method to get the latest end time of cancelled performances
+    private static LocalDateTime getLatestCancelledEndTime(Connection conn, int gigId, int actId) throws SQLException {
+        String sql = "SELECT MAX(ontime + (duration || ' minutes')::INTERVAL) as latest_end FROM ACT_GIG WHERE gigid = ? AND actid = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setInt(1, gigId);
+            stmt.setInt(2, actId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    Timestamp ts = rs.getTimestamp("latest_end");
+                    if (ts != null) {
+                        return ts.toLocalDateTime();
+                    }
+                }
+            }
+        }
+        return null;
+    }
+    
+    // Helper method to check if cancellation would violate interval rules
+    private static boolean wouldViolateIntervalRules(Connection conn, int gigId, int actId, int totalCancelledDuration) throws SQLException {
+        // Get all performances
+        List<PerformanceInfo> allPerfs = getAllPerformances(conn, gigId);
+        
+        if (allPerfs.size() <= 1) {
+            return false; // Only one or no performances, no intervals to check
+        }
+        
+        // Get the latest end time of cancelled performances
+        LocalDateTime latestCancelledEnd = getLatestCancelledEndTime(conn, gigId, actId);
+        if (latestCancelledEnd == null) {
+            return false;
+        }
+        
+        // Find the performance that ends just before the cancelled ones (or at the same time)
+        LocalDateTime prevEnd = null;
+        for (PerformanceInfo perf : allPerfs) {
+            if (perf.actId != actId && (perf.endTime.isBefore(latestCancelledEnd) || perf.endTime.equals(latestCancelledEnd))) {
+                if (prevEnd == null || perf.endTime.isAfter(prevEnd)) {
+                    prevEnd = perf.endTime;
+                }
+            }
+        }
+        
+        // Find the first performance after cancelled ones
+        PerformanceInfo firstAfter = null;
+        for (PerformanceInfo perf : allPerfs) {
+            if (perf.actId != actId && perf.onTime.isAfter(latestCancelledEnd)) {
+                if (firstAfter == null || perf.onTime.isBefore(firstAfter.onTime)) {
+                    firstAfter = perf;
+                }
+            }
+        }
+        
+        // Check the gap that would be created after cancellation
+        if (firstAfter != null) {
+            LocalDateTime adjustedNextStart = firstAfter.onTime.minusMinutes(totalCancelledDuration);
+            long gapMinutes;
+            
+            if (prevEnd != null) {
+                // There's a performance before the cancelled ones
+                gapMinutes = java.time.Duration.between(prevEnd, adjustedNextStart).toMinutes();
+            } else {
+                // No performance before, check gap from gig start
+                String gigStartSql = "SELECT gigdatetime FROM GIG WHERE gigid = ?";
+                try (PreparedStatement stmt = conn.prepareStatement(gigStartSql)) {
+                    stmt.setInt(1, gigId);
+                    try (ResultSet rs = stmt.executeQuery()) {
+                        if (rs.next()) {
+                            LocalDateTime gigStart = rs.getTimestamp("gigdatetime").toLocalDateTime();
+                            gapMinutes = java.time.Duration.between(gigStart, adjustedNextStart).toMinutes();
+                        } else {
+                            return false; // Gig not found
+                        }
+                    }
+                }
+            }
+            
+            // Check if gap violates Business Rule 10 (10-30 minutes)
+            if (gapMinutes > 0 && (gapMinutes < 10 || gapMinutes > 30)) {
+                return true; // Would violate interval rule
+            }
+        }
+        
+        // Also check intervals between remaining performances (they stay the same, but we should verify)
+        // Actually, intervals between performances that are both after cancelled ones remain the same
+        // So we only need to check the gap created by cancellation
+        
+        return false;
+    }
+    
+    // Helper method to cancel entire gig
+    private static String[][] cancelEntireGig(Connection conn, int gigId) throws SQLException {
+        // Update gig status to cancelled
+        String updateGigSql = "UPDATE GIG SET gigstatus = 'C' WHERE gigid = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(updateGigSql)) {
+            stmt.setInt(1, gigId);
+            stmt.executeUpdate();
+        }
+        
+        // Update all ticket costs to 0
+        String updateTicketSql = "UPDATE TICKET SET cost = 0 WHERE gigid = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(updateTicketSql)) {
+            stmt.setInt(1, gigId);
+            stmt.executeUpdate();
+        }
+        
+        // Get affected customers (distinct, ordered by name)
+        String customerSql = "SELECT DISTINCT customername, customeremail FROM TICKET WHERE gigid = ? ORDER BY customername ASC";
+        List<String[]> customers = new ArrayList<>();
+        try (PreparedStatement stmt = conn.prepareStatement(customerSql)) {
+            stmt.setInt(1, gigId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    String[] customer = new String[2];
+                    customer[0] = rs.getString("customername");
+                    customer[1] = rs.getString("customeremail");
+                    customers.add(customer);
+                }
+            }
+        }
+        
+        // Convert to 2D array
+        if (customers.isEmpty()) {
+            return new String[0][2]; // No customers affected
+        }
+        
+        String[][] result = new String[customers.size()][2];
+        for (int i = 0; i < customers.size(); i++) {
+            result[i] = customers.get(i);
+        }
+        return result;
+    }
+    
+    // Helper method to cancel act and adjust schedule
+    private static String[][] cancelActAndAdjustSchedule(Connection conn, int gigId, int actId, int totalCancelledDuration) throws SQLException {
+        // Get latest end time of cancelled performances
+        LocalDateTime latestCancelledEnd = getLatestCancelledEndTime(conn, gigId, actId);
+        
+        // Delete cancelled performances
+        String deleteSql = "DELETE FROM ACT_GIG WHERE gigid = ? AND actid = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(deleteSql)) {
+            stmt.setInt(1, gigId);
+            stmt.setInt(2, actId);
+            stmt.executeUpdate();
+        }
+        
+        // Adjust subsequent performances (move earlier by total cancelled duration)
+        if (latestCancelledEnd != null && totalCancelledDuration > 0) {
+            String adjustSql = "UPDATE ACT_GIG SET ontime = ontime - (? || ' minutes')::INTERVAL WHERE gigid = ? AND ontime > ?";
+            try (PreparedStatement stmt = conn.prepareStatement(adjustSql)) {
+                stmt.setInt(1, totalCancelledDuration);
+                stmt.setInt(2, gigId);
+                stmt.setTimestamp(3, Timestamp.valueOf(latestCancelledEnd));
+                stmt.executeUpdate();
+            }
+        }
+        
+        // Return updated lineup using task1 logic
+        return task1(conn, gigId);
+    }
 
     // ============================================
     // Task Methods
@@ -512,7 +776,101 @@ public class GigSystem {
     }
 
     public static String[][] task4(Connection conn, int gigID, String actName){
-        return null;
+        // Validate input
+        if (actName == null || actName.trim().isEmpty()) {
+            return null;
+        }
+        
+        boolean originalAutoCommit = true;
+        try {
+            // Set up transaction - disable auto-commit
+            originalAutoCommit = conn.getAutoCommit();
+            conn.setAutoCommit(false);
+            
+            // Step 1: Validate gig exists
+            if (!gigExistsAndActive(conn, gigID)) {
+                // Check if gig exists but is cancelled
+                String checkGigSql = "SELECT 1 FROM GIG WHERE gigid = ?";
+                try (PreparedStatement stmt = conn.prepareStatement(checkGigSql)) {
+                    stmt.setInt(1, gigID);
+                    try (ResultSet rs = stmt.executeQuery()) {
+                        if (!rs.next()) {
+                            conn.rollback();
+                            return null; // Gig does not exist
+                        }
+                    }
+                }
+                // Gig exists but is cancelled - cannot cancel act from cancelled gig
+                conn.rollback();
+                return null;
+            }
+            
+            // Step 2: Get act ID by name
+            int actId = getActIdByName(conn, actName);
+            if (actId == -1) {
+                conn.rollback();
+                return null; // Act not found
+            }
+            
+            // Step 3: Check if act has performances in this gig
+            String checkPerfSql = "SELECT COUNT(*) as count FROM ACT_GIG WHERE gigid = ? AND actid = ?";
+            int performanceCount = 0;
+            try (PreparedStatement stmt = conn.prepareStatement(checkPerfSql)) {
+                stmt.setInt(1, gigID);
+                stmt.setInt(2, actId);
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        performanceCount = rs.getInt("count");
+                    }
+                }
+            }
+            
+            if (performanceCount == 0) {
+                conn.rollback();
+                return null; // Act has no performances in this gig
+            }
+            
+            // Step 4: Calculate total cancelled duration
+            int totalCancelledDuration = getTotalCancelledDuration(conn, gigID, actId);
+            
+            // Step 5: Check if act is headline act (final or only act)
+            boolean isHeadline = isHeadlineAct(conn, gigID, actId);
+            
+            // Step 6: Check if cancellation would violate interval rules
+            boolean wouldViolate = wouldViolateIntervalRules(conn, gigID, actId, totalCancelledDuration);
+            
+            // Step 7: Decide action based on conditions
+            String[][] result;
+            
+            if (isHeadline || wouldViolate) {
+                // Situation B: Cancel entire gig
+                result = cancelEntireGig(conn, gigID);
+            } else {
+                // Situation A: Cancel act and adjust schedule
+                result = cancelActAndAdjustSchedule(conn, gigID, actId, totalCancelledDuration);
+            }
+            
+            // All operations successful - commit transaction
+            conn.commit();
+            return result;
+            
+        } catch (SQLException e) {
+            // Any SQL error - rollback transaction
+            try {
+                conn.rollback();
+            } catch (SQLException rollbackEx) {
+                rollbackEx.printStackTrace();
+            }
+            e.printStackTrace();
+            return null;
+        } finally {
+            // Restore original auto-commit setting
+            try {
+                conn.setAutoCommit(originalAutoCommit);
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
+        }
     }
 
     public static String[][] task5(Connection conn){
