@@ -27,8 +27,7 @@ public class GigSystem {
             System.out.println("_________________________");
             System.out.println("________GigSystem________");
             System.out.println("_________________________");
-
-            
+            System.out.println("1: View Gig Schedule");
             System.out.println("q: Quit");
 
             String menuChoice = readEntry("Please choose an option: ");
@@ -45,6 +44,24 @@ public class GigSystem {
              */
             switch(option){
                 case '1':
+                    // Task 1: View Gig Schedule
+                    // Read gigID from user
+                    String gigIDInput = readEntry("Enter gig ID: ");
+                    try {
+                        int gigID = Integer.parseInt(gigIDInput);
+                        // Call task1 to get the schedule
+                        String[][] schedule = task1(conn, gigID);
+                        
+                        // Display results
+                        if (schedule != null && schedule.length > 0) {
+                            System.out.println("\nGig Schedule for Gig ID " + gigID + ":");
+                            printTable(schedule);
+                        } else {
+                            System.out.println("No schedule found for gig ID " + gigID + ".");
+                        }
+                    } catch (NumberFormatException e) {
+                        System.out.println("Invalid gig ID. Please enter a number.");
+                    }
                     break;
 
                 case '2':
@@ -76,7 +93,49 @@ public class GigSystem {
      */
 
     public static String[][] task1(Connection conn, int gigID){
-        return null;
+        // SQL query to get act schedule for a specific gig
+        // Joins ACT_GIG with ACT to get act names
+        // Formats ontime and calculates offtime (ontime + duration)
+        // Orders results by ontime (earliest first)
+
+
+        // Sample return: 
+        /*
+            {
+                {"ViewBee 40", "18:00", "18:50"},
+                {"The Where", "19:00", "20:10"},
+                {"The Selecter", "20:25", "21:25"}
+            }
+        */
+
+        String sql = "SELECT " +
+                     "a.actname, " +
+                     "TO_CHAR(ag.ontime, 'HH24:MI') as ontime, " + //format timestamp to HH:mm 
+                     "TO_CHAR(ag.ontime + (ag.duration || ' minutes')::INTERVAL, 'HH24:MI') as offtime " + //adds duration and formats to HH:mm
+                     "FROM ACT_GIG ag " +
+                     "JOIN ACT a ON ag.actid = a.actid " +
+                     "WHERE ag.gigid = ? " +
+                     "ORDER BY ag.ontime ASC";
+        
+
+        //resource management: 
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setInt(1, gigID);
+            // Prepraed statement auto-closes the connection when the block ends
+            // Execute the query and get results
+    
+            try (ResultSet rs = stmt.executeQuery()) {
+                // Parameters binding: ensures the query is executed with the correct parameters
+                // Use helper method to convert ResultSet to String[][]
+                return convertResultToStrings(rs);
+            }
+            
+        } catch (SQLException e) {
+            // Debugging
+            e.printStackTrace();
+            // Return null on error (or could return empty array)
+            return null;
+        }
     }
 
     public static void task2(Connection conn, String venue, String gigTitle, LocalDateTime gigStart, int adultTicketPrice, ActPerformanceDetails[] actDetails){
