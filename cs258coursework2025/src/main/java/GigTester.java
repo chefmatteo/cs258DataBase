@@ -101,6 +101,8 @@ public class GigTester {
         
         // Get the maximum gigid before creating new gig (to find the new one later)
         int maxGigIdBefore = getMaxGigId(conn);
+        System.out.println("DEBUG: Max gig ID before task2: " + maxGigIdBefore);
+        System.out.println("DEBUG: Expected max gig ID from test data should be 50 (if testbig.sql loaded)");
         
         LocalDateTime[] onDates = new LocalDateTime[3];
         onDates[0] = LocalDateTime.of(2021,java.time.Month.NOVEMBER,02,20,00);

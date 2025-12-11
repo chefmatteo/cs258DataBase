@@ -137,6 +137,136 @@ public class GigSystem {
      * You may add extra methods if you wish (and you may overload the existing methods - as long as the original version is implemented)
      */
 
+    // ============================================
+    // Helper Methods (for Task implementations)
+    // ============================================
+    
+    // Helper method to get venue ID by name
+    private static int getVenueId(Connection conn, String venueName) throws SQLException {
+        String sql = "SELECT venueid FROM VENUE WHERE venuename = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, venueName);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getInt("venueid");
+                }
+            }
+        }
+        return -1; // Venue not found
+    }
+    
+    // Helper method to check if act exists
+    private static boolean actExists(Connection conn, int actId) throws SQLException {
+        String sql = "SELECT 1 FROM ACT WHERE actid = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setInt(1, actId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+    
+    // Helper method to get act genre
+    private static String getActGenre(Connection conn, int actId) throws SQLException {
+        String sql = "SELECT genre FROM ACT WHERE actid = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setInt(1, actId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getString("genre");
+                }
+            }
+        }
+        return null;
+    }
+    
+    // Helper method to insert GIG record
+    private static int insertGig(Connection conn, int venueId, String gigTitle, LocalDateTime gigStart) throws SQLException {
+        String sql = "INSERT INTO GIG (venueid, gigtitle, gigdatetime, gigstatus) VALUES (?, ?, ?, 'G') RETURNING gigid";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setInt(1, venueId);
+            stmt.setString(2, gigTitle);
+            stmt.setTimestamp(3, Timestamp.valueOf(gigStart));
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getInt("gigid");
+                }
+            }
+        }
+        return -1; // Failed to insert
+    }
+    
+    // Helper method to insert ACT_GIG record
+    // Throws SQLException if insert fails (e.g., business rule violation by trigger)
+    private static void insertActGig(Connection conn, int actId, int gigId, int fee, LocalDateTime onTime, int duration) throws SQLException {
+        String sql = "INSERT INTO ACT_GIG (actid, gigid, actgigfee, ontime, duration) VALUES (?, ?, ?, ?, ?)";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setInt(1, actId);
+            stmt.setInt(2, gigId);
+            stmt.setInt(3, fee);
+            stmt.setTimestamp(4, Timestamp.valueOf(onTime));
+            stmt.setInt(5, duration);
+            stmt.executeUpdate();
+            // If trigger raises exception for business rule violation, it will propagate up
+        }
+    }
+    
+    // Helper method to insert GIG_TICKET record
+    private static boolean insertGigTicket(Connection conn, int gigId, char priceType, int price) throws SQLException {
+        String sql = "INSERT INTO GIG_TICKET (gigid, pricetype, price) VALUES (?, ?, ?)";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setInt(1, gigId);
+            stmt.setString(2, String.valueOf(priceType));
+            stmt.setInt(3, price);
+            stmt.executeUpdate();
+            return true;
+        }
+    }
+    
+    // Helper method to check if gig exists and is active (not cancelled)
+    private static boolean gigExistsAndActive(Connection conn, int gigId) throws SQLException {
+        String sql = "SELECT 1 FROM GIG WHERE gigid = ? AND gigstatus = 'G'";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setInt(1, gigId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+    
+    // Helper method to get ticket price for a specific gig and price type
+    private static Integer getTicketPrice(Connection conn, int gigId, char priceType) throws SQLException {
+        String sql = "SELECT price FROM GIG_TICKET WHERE gigid = ? AND pricetype = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setInt(1, gigId);
+            stmt.setString(2, String.valueOf(priceType));
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getInt("price");
+                }
+            }
+        }
+        return null; // Price type not found
+    }
+    
+    // Helper method to insert TICKET record
+    private static void insertTicket(Connection conn, int gigId, String name, String email, char priceType, int cost) throws SQLException {
+        String sql = "INSERT INTO TICKET (gigid, customername, customeremail, pricetype, cost) VALUES (?, ?, ?, ?, ?)";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setInt(1, gigId);
+            stmt.setString(2, name);
+            stmt.setString(3, email);
+            stmt.setString(4, String.valueOf(priceType));
+            stmt.setInt(5, cost);
+            stmt.executeUpdate();
+            // If trigger raises exception (capacity exceeded, cost mismatch), it will propagate up
+        }
+    }
+
+    // ============================================
+    // Task Methods
+    // ============================================
+
     public static String[][] task1(Connection conn, int gigID){
         // SQL query to get act schedule for a specific gig
         // Joins ACT_GIG with ACT to get act names
@@ -321,91 +451,64 @@ public class GigSystem {
             }
         }
     }
-    
-    // Helper method to get venue ID by name
-    private static int getVenueId(Connection conn, String venueName) throws SQLException {
-        String sql = "SELECT venueid FROM VENUE WHERE venuename = ?";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setString(1, venueName);
-            try (ResultSet rs = stmt.executeQuery()) {
-                if (rs.next()) {
-                    return rs.getInt("venueid");
-                }
-            }
-        }
-        return -1; // Venue not found
-    }
-    
-    // Helper method to check if act exists
-    private static boolean actExists(Connection conn, int actId) throws SQLException {
-        String sql = "SELECT 1 FROM ACT WHERE actid = ?";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setInt(1, actId);
-            try (ResultSet rs = stmt.executeQuery()) {
-                return rs.next();
-            }
-        }
-    }
-    
-    // Helper method to get act genre
-    private static String getActGenre(Connection conn, int actId) throws SQLException {
-        String sql = "SELECT genre FROM ACT WHERE actid = ?";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setInt(1, actId);
-            try (ResultSet rs = stmt.executeQuery()) {
-                if (rs.next()) {
-                    return rs.getString("genre");
-                }
-            }
-        }
-        return null;
-    }
-    
-    // Helper method to insert GIG record
-    private static int insertGig(Connection conn, int venueId, String gigTitle, LocalDateTime gigStart) throws SQLException {
-        String sql = "INSERT INTO GIG (venueid, gigtitle, gigdatetime, gigstatus) VALUES (?, ?, ?, 'G') RETURNING gigid";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setInt(1, venueId);
-            stmt.setString(2, gigTitle);
-            stmt.setTimestamp(3, Timestamp.valueOf(gigStart));
-            try (ResultSet rs = stmt.executeQuery()) {
-                if (rs.next()) {
-                    return rs.getInt("gigid");
-                }
-            }
-        }
-        return -1; // Failed to insert
-    }
-    
-    // Helper method to insert ACT_GIG record
-    // Throws SQLException if insert fails (e.g., business rule violation by trigger)
-    private static void insertActGig(Connection conn, int actId, int gigId, int fee, LocalDateTime onTime, int duration) throws SQLException {
-        String sql = "INSERT INTO ACT_GIG (actid, gigid, actgigfee, ontime, duration) VALUES (?, ?, ?, ?, ?)";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setInt(1, actId);
-            stmt.setInt(2, gigId);
-            stmt.setInt(3, fee);
-            stmt.setTimestamp(4, Timestamp.valueOf(onTime));
-            stmt.setInt(5, duration);
-            stmt.executeUpdate();
-            // If trigger raises exception for business rule violation, it will propagate up
-        }
-    }
-    
-    // Helper method to insert GIG_TICKET record
-    private static boolean insertGigTicket(Connection conn, int gigId, char priceType, int price) throws SQLException {
-        String sql = "INSERT INTO GIG_TICKET (gigid, pricetype, price) VALUES (?, ?, ?)";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setInt(1, gigId);
-            stmt.setString(2, String.valueOf(priceType));
-            stmt.setInt(3, price);
-            stmt.executeUpdate();
-            return true;
-        }
-    }
 
     public static void task3(Connection conn, int gigid, String name, String email, String ticketType){
+        // Validate input
+        if (name == null || name.trim().isEmpty()) {
+            return; // Invalid customer name
+        }
+        if (email == null || email.trim().isEmpty()) {
+            return; // Invalid email
+        }
+        if (ticketType == null || ticketType.length() != 1) {
+            return; // Invalid ticket type (must be single character)
+        }
         
+        boolean originalAutoCommit = true;
+        try {
+            // Set up transaction - disable auto-commit
+            originalAutoCommit = conn.getAutoCommit();
+            conn.setAutoCommit(false);
+            
+            // Step 1: Validate gig exists and is not cancelled
+            if (!gigExistsAndActive(conn, gigid)) {
+                conn.rollback();
+                return; // Gig does not exist or is cancelled
+            }
+            
+            // Step 2: Validate ticketType exists in GIG_TICKET for this gig
+            Integer ticketPrice = getTicketPrice(conn, gigid, ticketType.charAt(0));
+            if (ticketPrice == null) {
+                conn.rollback();
+                return; // Ticket type not available for this gig
+            }
+            
+            // Step 3: Insert TICKET record
+            // Triggers will validate:
+            // - Ticket cost matches GIG_TICKET price (Business Rule via trigger)
+            // - Venue capacity is not exceeded (Business Rule 12 via trigger)
+            insertTicket(conn, gigid, name, email, ticketType.charAt(0), ticketPrice);
+            
+            // All validations passed and insert successful - commit transaction
+            conn.commit();
+            
+        } catch (SQLException e) {
+            // Any SQL error - rollback transaction
+            // This includes trigger violations (capacity exceeded, cost mismatch, etc.)
+            try {
+                conn.rollback();
+            } catch (SQLException rollbackEx) {
+                rollbackEx.printStackTrace();
+            }
+            e.printStackTrace();
+        } finally {
+            // Restore original auto-commit setting
+            try {
+                conn.setAutoCommit(originalAutoCommit);
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
+        }
     }
 
     public static String[][] task4(Connection conn, int gigID, String actName){
@@ -427,6 +530,10 @@ public class GigSystem {
     public static String[][] task8(Connection conn){
         return null;
     }
+
+    // ============================================
+    // Utility Methods
+    // ============================================
 
     /**
      * Prompts the user for input

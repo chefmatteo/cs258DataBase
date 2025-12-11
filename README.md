@@ -1,1 +1,309 @@
-# cs258DataBase
+<!-- This is a template for the README.md that you should submit. For instructions on how to get started, see INSTRUCTIONS.md -->
+# Design Choices
+
+## Database Schema Design
+
+### Table Structure
+The schema follows a normalized design with five core tables:
+- **ACT**: Stores musical acts with their genre and standard fee
+- **VENUE**: Stores venue information including capacity and hire cost
+- **GIG**: Stores gig information linked to venues, with status tracking ('G' for going ahead, 'C' for cancelled)
+- **ACT_GIG**: Junction table linking acts to gigs, storing performance details (ontime, duration, fee)
+- **GIG_TICKET**: Stores ticket pricing information per gig and price type
+- **TICKET**: Stores individual ticket purchases
+
+### Primary Keys and Sequences
+- All tables use INTEGER primary keys with sequences starting at 10001
+- ACT_GIG uses a composite primary key (actid, gigid, ontime) to allow the same act to perform multiple times at the same gig
+- Sequences ensure test data (IDs 1-10000) doesn't conflict with auto-generated IDs
+
+### Foreign Keys and Cascade Deletes
+All foreign keys use `ON DELETE CASCADE` to maintain referential integrity:
+- Deleting a gig automatically removes all related ACT_GIG, GIG_TICKET, and TICKET records
+- Deleting an act removes all related ACT_GIG records
+- Deleting a venue removes all related GIG records
+
+## Business Rules Enforcement
+
+The schema implements 17 business rules through a combination of CHECK constraints and database triggers. The rationale for using triggers over application-level validation is:
+
+1. **Data Integrity**: Business rules are enforced at the database level, preventing invalid data regardless of how it's inserted
+2. **Consistency**: All applications accessing the database must follow the same rules
+3. **Performance**: Database-level validation is efficient and doesn't require multiple round trips
+4. **Maintainability**: Rules are centralized in the schema, making them easier to update
+
+### Key Constraints and Triggers
+
+#### Table-Level CHECK Constraints
+- **GIG.gigdatetime**: Ensures gigs start between 9am and 11:59pm (Business Rule 15)
+- **ACT_GIG.duration**: Ensures performance duration is 15-90 minutes (Business Rule 5)
+- **All monetary values**: Non-negative checks for fees, costs, and prices
+- **VENUE.capacity**: Must be positive
+
+#### Trigger-Based Validations
+
+**1. First Act Start Time (Business Rule 11)**
+- `validate_first_act_start()`: Ensures the first act starts exactly at the gig's datetime
+- Rationale: The gig datetime represents when the event begins, so the first performance must align with this
+
+**2. No Overlapping Performances (Business Rule 1)**
+- `prevent_overlapping_performances()`: Prevents acts from overlapping at the same gig
+- Allows acts to start exactly when the previous act finishes (no gap required)
+- Rationale: Ensures smooth scheduling without conflicts while allowing back-to-back performances
+
+**3. Interval Duration (Business Rule 10)**
+- `validate_interval_duration()`: Ensures gaps between acts are 10-30 minutes
+- Only validates when there's an actual gap (not back-to-back performances)
+- Rationale: Maintains appropriate break times for audience and performers
+
+**4. Act Simultaneous Performance Prevention (Business Rule 2)**
+- `prevent_act_simultaneous_gigs()`: Prevents acts from performing in multiple gigs at the same time
+- Only checks non-cancelled gigs (Business Rule 16)
+- Rationale: Acts can only be in one place at a time
+
+**5. Same Act Break Requirement (Business Rule 6)**
+- `validate_same_act_break()`: Ensures the same act doesn't perform twice consecutively without a break
+- Rationale: Allows acts to perform multiple times at a gig (e.g., first half, interval, second half) but requires breaks between performances
+
+**6. Act Travel Time (Business Rule 7)**
+- `validate_act_travel_gap()`: Ensures 60-minute gap between gigs for the same act on the same day
+- Only checks non-cancelled gigs
+- Rationale: Provides sufficient time for acts to travel between venues
+
+**7. Venue Gap Requirement (Business Rule 9)**
+- `validate_venue_gap_on_act_change()`: Ensures 180-minute gap between gigs at the same venue
+- Validates when acts are added/updated to recalculate gig end times
+- Rationale: Provides time for venue staff to clean and prepare between events
+
+**8. Final Act Duration (Business Rule 13)**
+- `validate_final_act_duration()`: Ensures the final act finishes at least 60 minutes after gig start
+- Rationale: Ensures gigs have minimum duration for value and logistics
+
+**9. Gig Finish Time by Genre (Business Rule 14)**
+- `validate_gig_finish_time()`: Rock/pop gigs must finish by 11pm, others by 1am
+- Checks if any act in the gig has 'rock' or 'pop' genre (case sensitive)
+- Rationale: Noise regulations for residential areas
+
+**10. Act Fee Per Gig (Business Rule 4)**
+- `validate_act_fee_per_gig()`: Ensures all performances by the same act at the same gig have the same fee
+- Rationale: Acts receive one fee per gig regardless of number of performances
+
+**11. Ticket Cost Validation**
+- `validate_ticket_cost()`: Ensures ticket cost matches the price in GIG_TICKET
+- Rationale: Prevents pricing inconsistencies
+
+**12. Venue Capacity Validation (Business Rule 12)**
+- `validate_venue_capacity()`: Prevents ticket sales from exceeding venue capacity
+- Validates on INSERT and UPDATE
+- Rationale: Safety and legal compliance
+
+### Indexes
+Indexes are created on frequently queried columns:
+- `ACT_GIG(gigid, ontime)`: Optimizes Task 1 queries (gig schedule retrieval)
+- `GIG(venueid)`: Optimizes venue lookups
+- `TICKET(gigid)`: Optimizes ticket queries per gig
+
+# Task Implementations
+
+## Task 1
+
+Task 1 retrieves the lineup (schedule) for a given gigID, returning act names, start times, and end times in 24-hour format without seconds.
+
+**Implementation:**
+The solution uses a single SQL query that joins ACT_GIG with ACT to retrieve act names. The query:
+1. Selects `actname` from the ACT table
+2. Formats `ontime` using `TO_CHAR(ontime, 'HH24:MI')` to get 24-hour format without seconds
+3. Calculates `offtime` by adding duration to ontime: `ontime + (duration || ' minutes')::INTERVAL` and formats it similarly
+4. Filters by `gigid` using a parameterized query (prepared statement) to prevent SQL injection
+5. Orders results by `ontime ASC` to ensure chronological order
+
+**Design Rationale:**
+- Uses prepared statements for security and performance (query plan caching)
+- Performs time calculations in PostgreSQL rather than Java for accuracy
+- Uses `TO_CHAR` for consistent formatting regardless of timezone settings
+- Single query approach minimizes database round trips
+- The `convertResultToStrings()` helper method handles ResultSet to String[][] conversion, making the code reusable
+
+**Output Format:**
+Returns a 2D String array where each row contains [ActName, OnTime, OffTime] in the format:
+- ActName: Full act name (e.g., "ViewBee 40")
+- OnTime: Start time in HH:MM format (e.g., "18:00")
+- OffTime: End time in HH:MM format (e.g., "18:50")
+
+Rows are ordered chronologically by start time, ensuring the schedule is presented in performance order.
+
+## Task 2
+Task 2 required us to create a new gig at a venue with multiple acts, ensuring all business rules are satisfied. 
+
+**Input:**
+- venue: venue name 
+- gigTitle: Title of the gig 
+- gigStart (LocalDateTime): When the gig starts
+- adultTicketPrice (int): Price for adult tickets 
+- actDetails(ActPerformanceDetails[]): Array of act performances -> might need to sort before adding it to our database
+
+
+**Implementation**
+- Disable auto-commit: We wanna make sure all the business rules and requirements are met before commiting the record 
+    - Use-try-catch finally for rollback on errors
+    - Commits only if all the validations pass
+- Validate venue exists: 
+    - Query `VENUE` by name to get `venueid`    
+    - If not found, rollback and return 
+- Validate gig start time: 
+    - gigs must start between 9am and 11:59pm
+    - Check gigStart is within this range 
+- Sort acts chronologically
+    - Sort actDetails by onTIme(earliest first)
+    - Needed for subsequent validation
+- Validate first act start time:
+    - Ensure the first act starts exactly at gigStart
+    - Compare the earliest act's onTime with gigStart
+
+- Validate all act performances:
+    For each act in actDetails:
+    - Act exists in the ACT table (query by actid)
+    - Duration is between 15 and 90 minutes (Business Rule 5); already enforced by CHECK constraint, but verify
+    - Fee is non-negative; already enforced by CHECK, but verify
+
+- Validate cross-gig constraints for each act:
+    - Not performing in another non-cancelled gig at the same time (Business Rule 2)
+    - 60-minute gap between gigs for the same act on the same day (Business Rule 7)
+
+- Validate venue constraints:
+    - 180-minute gap between gigs at the same venue (Business Rule 9)
+
+- Validate gig finish time:
+    - Rock/pop gigs must finish by 11pm; others by 1am (Business Rule 14)
+    - Check genre of all acts for appropriate finish time
+
+- Validate act fees:
+    - All performances by the same act at the same gig must have the same fee (Business Rule 4)
+    - Group actDetails by actID and verify all fees per act are identical
+
+- Insert data (if all validations pass):
+    - Insert into GIG table: get next gigid from sequence, insert venueid, gigtitle, gigdatetime, gigstatus = 'G'
+    - Insert into ACT_GIG table: for each act, insert actid, gigid, actgigfee, ontime, duration
+    - Insert into GIG_TICKET table: insert adult ticket price (gigid, pricetype='A', price=adultTicketPrice)
+
+- Commit or rollback:
+    - If all inserts succeed: commit
+    - If any error: rollback
+
+**Design Rationale**
+
+The implementation uses a two-layer validation approach combining application-level checks with database-level triggers:
+
+1. **Transaction Management**: All operations are wrapped in a transaction with manual commit control. This ensures atomicity - either all inserts succeed or none do, maintaining database consistency. The original auto-commit setting is preserved and restored in the finally block to avoid affecting other operations.
+
+2. **Pre-validation in Java**: We validate certain rules in Java before attempting database inserts:
+   - **Venue existence**: Early validation prevents unnecessary work if the venue doesn't exist
+   - **Gig start time**: Simple time range check that's efficient in Java
+   - **Act existence**: Validates all acts exist before processing
+   - **First act timing**: Ensures the first act starts exactly at gigStart (Business Rule 11)
+   - **Final act duration**: Validates minimum gig duration (Business Rule 13)
+   - **Genre-based finish time**: Checks if rock/pop acts require earlier finish (Business Rule 14)
+   - **Fee consistency**: Validates same act has same fee across all performances (Business Rule 4)
+
+3. **Database Triggers for Complex Rules**: We rely on database triggers to validate complex cross-gig and scheduling rules:
+   - **No overlapping performances** (Business Rule 1): Trigger checks all existing performances
+   - **No simultaneous gigs** (Business Rule 2): Trigger checks all non-cancelled gigs
+   - **Same act break requirement** (Business Rule 6): Trigger validates consecutive performances
+   - **Travel time between gigs** (Business Rule 7): Trigger checks 60-minute gap requirement
+   - **Venue gap requirement** (Business Rule 9): Trigger validates 180-minute gap between gigs
+   - **Interval duration** (Business Rule 10): Trigger ensures 10-30 minute intervals
+
+4. **Chronological Sorting**: Acts are sorted by `onTime` before validation to:
+   - Identify the first and last acts for timing validations
+   - Ensure proper order for interval calculations
+   - Make the validation logic simpler and more efficient
+
+5. **Helper Methods**: The implementation uses private helper methods for:
+   - **Code reusability**: Common operations like venue lookup are encapsulated
+   - **Separation of concerns**: Each method has a single responsibility
+   - **Error handling**: SQLExceptions are properly propagated to the transaction handler
+   - **Maintainability**: Changes to database queries are localized
+
+6. **Error Handling Strategy**: All SQLExceptions are caught at the transaction level and trigger a rollback. This ensures that:
+   - Database triggers that raise exceptions for business rule violations are properly handled
+   - Any unexpected database errors don't leave partial data
+   - The database state is always consistent
+
+**Output Format**
+
+Task 2 returns `void` - it does not return any data structure. The method either:
+- **Succeeds silently**: All validations pass and the gig is created in the database (transaction committed)
+- **Fails silently**: Any validation fails or business rule is violated, and the transaction is rolled back (no changes to database)
+
+The method uses early returns with rollbacks for validation failures, and relies on exception handling for database-level constraint violations. This design ensures that callers cannot distinguish between different failure modes, maintaining the requirement that invalid gigs are simply not created.
+
+## Task 3
+
+Task 3 allows customers to purchase tickets for a gig, ensuring all business rules are satisfied.
+
+**Input:**
+- gigid: ID of the gig to purchase a ticket for
+- name: Customer name
+- email: Customer email address
+- ticketType: Ticket type (single character, e.g., 'A' for Adult)
+
+**Implementation**
+
+- **Transaction Management**: All operations are wrapped in a transaction with manual commit control to ensure atomicity - either the ticket purchase succeeds or the database state remains unchanged.
+
+- **Input Validation**:
+  - Customer name must not be null or empty
+  - Email must not be null or empty
+  - Ticket type must be a single character
+
+- **Gig Validation**:
+  - Gig must exist in the database
+  - Gig status must be 'G' (going ahead, not cancelled)
+
+- **Ticket Type Validation**:
+  - Ticket type must exist in GIG_TICKET table for the specified gig
+  - Retrieves the correct price for the ticket type
+
+- **Ticket Insertion**:
+  - Inserts TICKET record with customer details and correct price
+  - Database triggers automatically validate:
+    - **Ticket cost matches GIG_TICKET price**: Ensures the cost field matches the price defined in GIG_TICKET
+    - **Venue capacity not exceeded** (Business Rule 12): Prevents ticket sales from exceeding venue capacity
+
+- **Error Handling**:
+  - Any validation failure triggers rollback
+  - SQLExceptions from triggers (capacity exceeded, price mismatch) are caught and trigger rollback
+  - Original auto-commit setting is restored in finally block
+
+**Design Rationale**
+
+1. **Transaction Atomicity**: The entire ticket purchase is wrapped in a transaction to ensure that if any validation fails or a business rule is violated, no partial data is inserted into the database.
+
+2. **Two-Layer Validation**:
+   - **Application-level checks**: Validates gig existence, status, and ticket type availability before attempting database operations
+   - **Database-level triggers**: Enforce business rules (capacity limits, price consistency) that require checking against current database state
+
+3. **Price Retrieval**: The ticket price is retrieved from GIG_TICKET before insertion to ensure the correct price is used, and the trigger validates that the inserted cost matches this price.
+
+4. **Capacity Validation**: The venue capacity check is handled by a database trigger because it requires counting all existing tickets for the gig, which is more efficiently done at the database level and ensures consistency even with concurrent ticket purchases.
+
+5. **Error Handling Strategy**: All SQLExceptions (including those raised by triggers) are caught at the transaction level, ensuring proper rollback and maintaining database consistency.
+
+**Output Format**
+
+Task 3 returns `void` - it does not return any data structure. The method either:
+- **Succeeds silently**: All validations pass and the ticket is purchased (transaction committed)
+- **Fails silently**: Any validation fails or business rule is violated, and the transaction is rolled back (no changes to database)
+
+The method uses early returns with rollbacks for validation failures, and relies on exception handling for database-level constraint violations (capacity exceeded, price mismatch).
+
+## Task 4
+
+## Task 5
+
+## Task 6
+
+## Task 7
+
+## Task 8
+
