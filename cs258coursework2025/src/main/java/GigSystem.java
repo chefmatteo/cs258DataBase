@@ -918,7 +918,87 @@ public class GigSystem {
     }
 
     public static String[][] task5(Connection conn){
-        return null;
+        try {
+            // SQL query to calculate tickets needed to sell for each gig
+            // Uses CTEs to:
+            // 1. Calculate act fees per gig (each act counted once per gig, as per Business Rule 4)
+            // 2. Calculate total cost per gig (act fees + venue hire cost)
+            // 3. Calculate total revenue per gig (sum of all ticket costs)
+            // 4. Find cheapest ticket price per gig
+            // 5. Calculate tickets needed to sell
+            String sql = 
+                "WITH act_fees_per_gig AS (" +
+                "    SELECT " +
+                "        gigid, " +
+                "        actid, " +
+                "        MAX(actgigfee) as act_fee " +  // All performances by same act have same fee (Business Rule 4)
+                "    FROM ACT_GIG " +
+                "    GROUP BY gigid, actid" +
+                "), " +
+                "gig_costs AS (" +
+                "    SELECT " +
+                "        g.gigid, " +
+                "        COALESCE(SUM(af.act_fee), 0) as total_act_fees, " +
+                "        v.hirecost, " +
+                "        COALESCE(SUM(af.act_fee), 0) + v.hirecost as total_cost " +
+                "    FROM GIG g " +
+                "    LEFT JOIN VENUE v ON g.venueid = v.venueid " +
+                "    LEFT JOIN act_fees_per_gig af ON g.gigid = af.gigid " +
+                "    GROUP BY g.gigid, v.hirecost" +
+                "), " +
+                "gig_revenue AS (" +
+                "    SELECT " +
+                "        gigid, " +
+                "        COALESCE(SUM(cost), 0) as total_revenue " +
+                "    FROM TICKET " +
+                "    GROUP BY gigid" +
+                "), " +
+                "gig_cheapest_price AS (" +
+                "    SELECT " +
+                "        gigid, " +
+                "        MIN(price) as cheapest_price " +
+                "    FROM GIG_TICKET " +
+                "    GROUP BY gigid" +
+                ") " +
+                "SELECT " +
+                "    gc.gigid, " +
+                "    CASE " +
+                "        WHEN COALESCE(gr.total_revenue, 0) >= gc.total_cost THEN 0 " +
+                "        WHEN gcp.cheapest_price IS NULL OR gcp.cheapest_price = 0 THEN 0 " +  // No tickets defined, return 0
+                "        ELSE CEIL((gc.total_cost - COALESCE(gr.total_revenue, 0))::NUMERIC / gcp.cheapest_price)::INTEGER " +
+                "    END as tickets_to_sell " +
+                "FROM gig_costs gc " +
+                "LEFT JOIN gig_revenue gr ON gc.gigid = gr.gigid " +
+                "LEFT JOIN gig_cheapest_price gcp ON gc.gigid = gcp.gigid " +
+                "ORDER BY gc.gigid ASC";
+            
+            try (PreparedStatement stmt = conn.prepareStatement(sql);
+                 ResultSet rs = stmt.executeQuery()) {
+                
+                // Collect results in a list first to determine size
+                List<String[]> results = new ArrayList<>();
+                while (rs.next()) {
+                    String[] row = new String[2];
+                    row[0] = String.valueOf(rs.getInt("gigid"));
+                    row[1] = String.valueOf(rs.getInt("tickets_to_sell"));
+                    results.add(row);
+                }
+                
+                // Convert to 2D array
+                if (results.isEmpty()) {
+                    return new String[0][2];
+                }
+                
+                String[][] result = new String[results.size()][2];
+                for (int i = 0; i < results.size(); i++) {
+                    result[i] = results.get(i);
+                }
+                return result;
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+            return null;
+        }
     }
 
     public static String[][] task6(Connection conn){
