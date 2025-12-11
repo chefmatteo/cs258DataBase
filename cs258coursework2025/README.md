@@ -133,6 +133,109 @@ Returns a 2D String array where each row contains [ActName, OnTime, OffTime] in 
 Rows are ordered chronologically by start time, ensuring the schedule is presented in performance order.
 
 ## Task 2
+Task 2 required us to create a new gig at a venue with multiple acts, ensuring all business rules are satisfied. 
+
+**Input:**
+- venue: venue name 
+- gigTitle: Title of the gig 
+- gigStart (LocalDateTime): When the gig starts
+- adultTicketPrice (int): Price for adult tickets 
+- actDetails(ActPerformanceDetails[]): Array of act performances -> might need to sort before adding it to our database
+
+
+**Implementation**
+- Disable auto-commit: We wanna make sure all the business rules and requirements are met before commiting the record 
+    - Use-try-catch finally for rollback on errors
+    - Commits only if all the validations pass
+- Validate venue exists: 
+    - Query `VENUE` by name to get `venueid`    
+    - If not found, rollback and return 
+- Validate gig start time: 
+    - gigs must start between 9am and 11:59pm
+    - Check gigStart is within this range 
+- Sort acts chronologically
+    - Sort actDetails by onTIme(earliest first)
+    - Needed for subsequent validation
+- Validate first act start time:
+    - Ensure the first act starts exactly at gigStart
+    - Compare the earliest act's onTime with gigStart
+
+- Validate all act performances:
+    For each act in actDetails:
+    - Act exists in the ACT table (query by actid)
+    - Duration is between 15 and 90 minutes (Business Rule 5); already enforced by CHECK constraint, but verify
+    - Fee is non-negative; already enforced by CHECK, but verify
+
+- Validate cross-gig constraints for each act:
+    - Not performing in another non-cancelled gig at the same time (Business Rule 2)
+    - 60-minute gap between gigs for the same act on the same day (Business Rule 7)
+
+- Validate venue constraints:
+    - 180-minute gap between gigs at the same venue (Business Rule 9)
+
+- Validate gig finish time:
+    - Rock/pop gigs must finish by 11pm; others by 1am (Business Rule 14)
+    - Check genre of all acts for appropriate finish time
+
+- Validate act fees:
+    - All performances by the same act at the same gig must have the same fee (Business Rule 4)
+    - Group actDetails by actID and verify all fees per act are identical
+
+- Insert data (if all validations pass):
+    - Insert into GIG table: get next gigid from sequence, insert venueid, gigtitle, gigdatetime, gigstatus = 'G'
+    - Insert into ACT_GIG table: for each act, insert actid, gigid, actgigfee, ontime, duration
+    - Insert into GIG_TICKET table: insert adult ticket price (gigid, pricetype='A', price=adultTicketPrice)
+
+- Commit or rollback:
+    - If all inserts succeed: commit
+    - If any error: rollback
+
+**Design Rationale**
+
+The implementation uses a two-layer validation approach combining application-level checks with database-level triggers:
+
+1. **Transaction Management**: All operations are wrapped in a transaction with manual commit control. This ensures atomicity - either all inserts succeed or none do, maintaining database consistency. The original auto-commit setting is preserved and restored in the finally block to avoid affecting other operations.
+
+2. **Pre-validation in Java**: We validate certain rules in Java before attempting database inserts:
+   - **Venue existence**: Early validation prevents unnecessary work if the venue doesn't exist
+   - **Gig start time**: Simple time range check that's efficient in Java
+   - **Act existence**: Validates all acts exist before processing
+   - **First act timing**: Ensures the first act starts exactly at gigStart (Business Rule 11)
+   - **Final act duration**: Validates minimum gig duration (Business Rule 13)
+   - **Genre-based finish time**: Checks if rock/pop acts require earlier finish (Business Rule 14)
+   - **Fee consistency**: Validates same act has same fee across all performances (Business Rule 4)
+
+3. **Database Triggers for Complex Rules**: We rely on database triggers to validate complex cross-gig and scheduling rules:
+   - **No overlapping performances** (Business Rule 1): Trigger checks all existing performances
+   - **No simultaneous gigs** (Business Rule 2): Trigger checks all non-cancelled gigs
+   - **Same act break requirement** (Business Rule 6): Trigger validates consecutive performances
+   - **Travel time between gigs** (Business Rule 7): Trigger checks 60-minute gap requirement
+   - **Venue gap requirement** (Business Rule 9): Trigger validates 180-minute gap between gigs
+   - **Interval duration** (Business Rule 10): Trigger ensures 10-30 minute intervals
+
+4. **Chronological Sorting**: Acts are sorted by `onTime` before validation to:
+   - Identify the first and last acts for timing validations
+   - Ensure proper order for interval calculations
+   - Make the validation logic simpler and more efficient
+
+5. **Helper Methods**: The implementation uses private helper methods for:
+   - **Code reusability**: Common operations like venue lookup are encapsulated
+   - **Separation of concerns**: Each method has a single responsibility
+   - **Error handling**: SQLExceptions are properly propagated to the transaction handler
+   - **Maintainability**: Changes to database queries are localized
+
+6. **Error Handling Strategy**: All SQLExceptions are caught at the transaction level and trigger a rollback. This ensures that:
+   - Database triggers that raise exceptions for business rule violations are properly handled
+   - Any unexpected database errors don't leave partial data
+   - The database state is always consistent
+
+**Output Format**
+
+Task 2 returns `void` - it does not return any data structure. The method either:
+- **Succeeds silently**: All validations pass and the gig is created in the database (transaction committed)
+- **Fails silently**: Any validation fails or business rule is violated, and the transaction is rolled back (no changes to database)
+
+The method uses early returns with rollbacks for validation failures, and relies on exception handling for database-level constraint violations. This design ensures that callers cannot distinguish between different failure modes, maintaining the requirement that invalid gigs are simply not created.
 
 ## Task 3
 

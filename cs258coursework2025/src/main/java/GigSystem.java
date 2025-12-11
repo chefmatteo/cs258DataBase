@@ -8,10 +8,16 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.Set;
+import java.util.HashSet;
 
 import java.time.LocalDateTime;
 import java.sql.Timestamp;
 import java.util.Vector;
+import java.util.Arrays;
+import java.util.Comparator;
 
 public class GigSystem {
 
@@ -139,7 +145,224 @@ public class GigSystem {
     }
 
     public static void task2(Connection conn, String venue, String gigTitle, LocalDateTime gigStart, int adultTicketPrice, ActPerformanceDetails[] actDetails){
+        // Validate input
+        if (venue == null || venue.trim().isEmpty()) {
+            return; // Invalid venue name
+        }
+        if (gigTitle == null || gigTitle.trim().isEmpty()) {
+            return; // Invalid gig title
+        }
+        if (actDetails == null || actDetails.length == 0) {
+            return; // No acts provided
+        }
+        if (adultTicketPrice < 0) {
+            return; // Invalid ticket price
+        }
         
+        boolean originalAutoCommit = true;
+        try {
+            // Set up transaction - disable auto-commit
+            originalAutoCommit = conn.getAutoCommit();
+            conn.setAutoCommit(false);
+            
+            // Step 1: Validate venue exists and get venueid
+            int venueId = getVenueId(conn, venue);
+            if (venueId == -1) {
+                conn.rollback();
+                return; // Venue not found
+            }
+            
+            // Step 2: Validate gig start time (Business Rule 15: 9am to 11:59pm)
+            int hour = gigStart.getHour();
+            int minute = gigStart.getMinute();
+            if (hour < 9 || hour > 23 || (hour == 23 && minute > 59)) {
+                conn.rollback();
+                return; // Invalid gig start time
+            }
+            
+            // Step 3: Sort acts chronologically by onTime
+            Arrays.sort(actDetails, Comparator.comparing(ActPerformanceDetails::getOnTime));
+            
+            // Step 4: Validate all acts exist and collect genres
+            Set<String> genres = new HashSet<>();
+            for (ActPerformanceDetails act : actDetails) {
+                if (!actExists(conn, act.getActID())) {
+                    conn.rollback();
+                    return; // Act does not exist
+                }
+                // Get genre for finish time validation
+                String genre = getActGenre(conn, act.getActID());
+                if (genre != null) {
+                    genres.add(genre);
+                }
+            }
+            
+            // Step 5: Validate first act starts at gigStart (Business Rule 11)
+            if (!actDetails[0].getOnTime().equals(gigStart)) {
+                conn.rollback();
+                return; // First act must start at gig start time
+            }
+            
+            // Step 6: Validate final act finishes at least 60 mins after start (Business Rule 13)
+            ActPerformanceDetails lastAct = actDetails[actDetails.length - 1];
+            LocalDateTime lastActEnd = lastAct.getOnTime().plusMinutes(lastAct.getDuration());
+            LocalDateTime gigStartPlus60 = gigStart.plusMinutes(60);
+            if (lastActEnd.isBefore(gigStartPlus60)) {
+                conn.rollback();
+                return; // Final act must finish at least 60 minutes after gig start
+            }
+            
+            // Step 7: Validate gig finish time by genre (Business Rule 14)
+            LocalDateTime maxFinishTime;
+            boolean hasRockOrPop = genres.contains("rock") || genres.contains("pop");
+            if (hasRockOrPop) {
+                // Rock/pop gigs must finish by 11pm
+                maxFinishTime = gigStart.toLocalDate().atTime(23, 0);
+            } else {
+                // Other gigs must finish by 1am next day
+                maxFinishTime = gigStart.toLocalDate().plusDays(1).atTime(1, 0);
+            }
+            if (lastActEnd.isAfter(maxFinishTime)) {
+                conn.rollback();
+                return; // Gig finish time violates genre-based rule
+            }
+            
+            // Step 8: Validate act fees are consistent per act per gig (Business Rule 4)
+            Map<Integer, Integer> actFees = new HashMap<>();
+            for (ActPerformanceDetails act : actDetails) {
+                int actId = act.getActID();
+                int fee = act.getFee();
+                if (actFees.containsKey(actId)) {
+                    // Same act appears multiple times - fees must match
+                    if (actFees.get(actId) != fee) {
+                        conn.rollback();
+                        return; // Same act has different fees for same gig
+                    }
+                } else {
+                    actFees.put(actId, fee);
+                }
+            }
+            
+            // Step 9: Insert GIG record
+            int gigId = insertGig(conn, venueId, gigTitle, gigStart);
+            if (gigId == -1) {
+                conn.rollback();
+                return; // Failed to insert gig
+            }
+            
+            // Step 10: Insert ACT_GIG records (triggers will validate most business rules)
+            for (ActPerformanceDetails act : actDetails) {
+                insertActGig(conn, act.getActID(), gigId, act.getFee(), act.getOnTime(), act.getDuration());
+                // If insert fails, SQLException will be thrown and caught by outer try-catch
+            }
+            
+            // Step 11: Insert GIG_TICKET record for adult tickets
+            if (!insertGigTicket(conn, gigId, 'A', adultTicketPrice)) {
+                conn.rollback();
+                return; // Failed to insert ticket pricing
+            }
+            
+            // All validations passed and inserts successful - commit transaction
+            conn.commit();
+            
+        } catch (SQLException e) {
+            // Any SQL error - rollback transaction
+            try {
+                conn.rollback();
+            } catch (SQLException rollbackEx) {
+                rollbackEx.printStackTrace();
+            }
+            e.printStackTrace();
+        } finally {
+            // Restore original auto-commit setting
+            try {
+                conn.setAutoCommit(originalAutoCommit);
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+    
+    // Helper method to get venue ID by name
+    private static int getVenueId(Connection conn, String venueName) throws SQLException {
+        String sql = "SELECT venueid FROM VENUE WHERE venuename = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, venueName);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getInt("venueid");
+                }
+            }
+        }
+        return -1; // Venue not found
+    }
+    
+    // Helper method to check if act exists
+    private static boolean actExists(Connection conn, int actId) throws SQLException {
+        String sql = "SELECT 1 FROM ACT WHERE actid = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setInt(1, actId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+    
+    // Helper method to get act genre
+    private static String getActGenre(Connection conn, int actId) throws SQLException {
+        String sql = "SELECT genre FROM ACT WHERE actid = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setInt(1, actId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getString("genre");
+                }
+            }
+        }
+        return null;
+    }
+    
+    // Helper method to insert GIG record
+    private static int insertGig(Connection conn, int venueId, String gigTitle, LocalDateTime gigStart) throws SQLException {
+        String sql = "INSERT INTO GIG (venueid, gigtitle, gigdatetime, gigstatus) VALUES (?, ?, ?, 'G') RETURNING gigid";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setInt(1, venueId);
+            stmt.setString(2, gigTitle);
+            stmt.setTimestamp(3, Timestamp.valueOf(gigStart));
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getInt("gigid");
+                }
+            }
+        }
+        return -1; // Failed to insert
+    }
+    
+    // Helper method to insert ACT_GIG record
+    // Throws SQLException if insert fails (e.g., business rule violation by trigger)
+    private static void insertActGig(Connection conn, int actId, int gigId, int fee, LocalDateTime onTime, int duration) throws SQLException {
+        String sql = "INSERT INTO ACT_GIG (actid, gigid, actgigfee, ontime, duration) VALUES (?, ?, ?, ?, ?)";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setInt(1, actId);
+            stmt.setInt(2, gigId);
+            stmt.setInt(3, fee);
+            stmt.setTimestamp(4, Timestamp.valueOf(onTime));
+            stmt.setInt(5, duration);
+            stmt.executeUpdate();
+            // If trigger raises exception for business rule violation, it will propagate up
+        }
+    }
+    
+    // Helper method to insert GIG_TICKET record
+    private static boolean insertGigTicket(Connection conn, int gigId, char priceType, int price) throws SQLException {
+        String sql = "INSERT INTO GIG_TICKET (gigid, pricetype, price) VALUES (?, ?, ?)";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setInt(1, gigId);
+            stmt.setString(2, String.valueOf(priceType));
+            stmt.setInt(3, price);
+            stmt.executeUpdate();
+            return true;
+        }
     }
 
     public static void task3(Connection conn, int gigid, String name, String email, String ticketType){
