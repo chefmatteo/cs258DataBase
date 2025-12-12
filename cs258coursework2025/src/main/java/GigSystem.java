@@ -137,9 +137,7 @@ public class GigSystem {
      * You may add extra methods if you wish (and you may overload the existing methods - as long as the original version is implemented)
      */
 
-    // ============================================
     // Helper Methods (for Task implementations)
-    // ============================================
     
     // Helper method to get venue ID by name
     private static int getVenueId(Connection conn, String venueName) throws SQLException {
@@ -567,7 +565,7 @@ public class GigSystem {
         return task1(conn, gigId);
     }
 
-    // ============================================
+
     // Task Methods
     // ============================================
 
@@ -1002,20 +1000,111 @@ public class GigSystem {
     }
 
     public static String[][] task6(Connection conn){
-        return null;
+        try {
+            // SQL query to find tickets sold per act per year for headline acts only
+            // Uses CTEs to:
+            // 1. Identify headline acts (acts with latest end time per gig)
+            // 2. Count tickets per act per year
+            // 3. Calculate totals per act
+            String sql = 
+                "WITH headline_acts AS (" +
+                "    -- Find headline act for each non-cancelled gig" +
+                "    -- Headline act = act with latest end time (ontime + duration)" +
+                "    SELECT DISTINCT" +
+                "        ag.gigid," +
+                "        ag.actid," +
+                "        a.actname" +
+                "    FROM ACT_GIG ag" +
+                "    JOIN ACT a ON ag.actid = a.actid" +
+                "    JOIN GIG g ON ag.gigid = g.gigid" +
+                "    WHERE g.gigstatus = 'G'" +  // Only non-cancelled gigs
+                "      AND (ag.ontime + (ag.duration || ' minutes')::INTERVAL) = (" +
+                "          -- Subquery to find latest end time for this gig" +
+                "          SELECT MAX(ag2.ontime + (ag2.duration || ' minutes')::INTERVAL)" +
+                "          FROM ACT_GIG ag2" +
+                "          WHERE ag2.gigid = ag.gigid" +
+                "      )" +
+                ")," +
+                "tickets_per_year AS (" +
+                "    -- Count tickets sold per act per year" +
+                "    SELECT " +
+                "        ha.actname," +
+                "        EXTRACT(YEAR FROM g.gigdatetime)::INTEGER as year," +
+                "        COUNT(*) as tickets_sold" +
+                "    FROM headline_acts ha" +
+                "    JOIN GIG g ON ha.gigid = g.gigid" +
+                "    JOIN TICKET t ON g.gigid = t.gigid" +
+                "    GROUP BY ha.actname, EXTRACT(YEAR FROM g.gigdatetime)" +
+                ")," +
+                "act_totals AS (" +
+                "    -- Calculate total tickets per act" +
+                "    SELECT " +
+                "        actname," +
+                "        SUM(tickets_sold) as total_tickets" +
+                "    FROM tickets_per_year" +
+                "    GROUP BY actname" +
+                ")" +
+                "SELECT " +
+                "    tpy.actname," +
+                "    tpy.year::TEXT as year," +
+                "    tpy.tickets_sold::TEXT as tickets_sold," +
+                "    at.total_tickets" +
+                "FROM tickets_per_year tpy" +
+                "JOIN act_totals at ON tpy.actname = at.actname" +
+                "UNION ALL" +
+                "SELECT " +
+                "    at.actname," +
+                "    'Total' as year," +
+                "    at.total_tickets::TEXT as tickets_sold," +
+                "    at.total_tickets" +
+                "FROM act_totals at" +
+                "ORDER BY " +
+                "    total_tickets ASC," +
+                "    CASE WHEN year = 'Total' THEN 1 ELSE 0 END," +
+                "    year ASC";
+            
+            try (PreparedStatement stmt = conn.prepareStatement(sql);
+                 ResultSet rs = stmt.executeQuery()) {
+                
+                // Collect results in a list
+                List<String[]> results = new ArrayList<>();
+                while (rs.next()) {
+                    String[] row = new String[3];
+                    row[0] = rs.getString("actname");
+                    row[1] = rs.getString("year");
+                    row[2] = rs.getString("tickets_sold");
+                    results.add(row);
+                }
+                
+                // Convert to 2D array
+                if (results.isEmpty()) {
+                    return new String[0][3];
+                }
+                
+                String[][] result = new String[results.size()][3];
+                for (int i = 0; i < results.size(); i++) {
+                    result[i] = results.get(i);
+                }
+                return result;
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+            return null;
+        }
     }
 
     public static String[][] task7(Connection conn){
         return null;
+        catch (SQLException e){
+
+        }
     }
 
     public static String[][] task8(Connection conn){
         return null;
     }
 
-    // ============================================
     // Utility Methods
-    // ============================================
 
     /**
      * Prompts the user for input

@@ -49,7 +49,7 @@ gigID  Tickets To Sell
 ```
 
 ## Task 6: How many tickets sold: 
-- eate a 2-dimensional array of strings to show the total number of tickets (of any pricetype) that each act has sold. Only consider gigs where the act is listed as a headline act (the final or only act), and only include gigs that are not listed as cancelled. 
+- Ceate a 2-dimensional array of strings to show the total number of tickets (of any pricetype) that each act has sold. Only consider gigs where the act is listed as a headline act (the final or only act), and only include gigs that are not listed as cancelled. 
 - For each act, find the number of tickets sold per year and show the total number of tickets ever sold by each act when the act was a headline act. 
 - Order your result with the acts who have sold the least total number of tickets first, then ordered by Year (with 'Total' at the end of each group of years). 
 Sample output (headings must not be in your output, these illustrate expected column order): Act name Year Total Tickets Sold 
