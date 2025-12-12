@@ -1067,6 +1067,9 @@ public class GigSystem {
                 "    CASE WHEN combined.year = 'Total' THEN 1 ELSE 0 END," +
                 "    CASE WHEN combined.year = 'Total' THEN NULL ELSE combined.year::INTEGER END ASC NULLS LAST";
             
+            // Debug: Print SQL query
+            System.out.println("DEBUG Task6 SQL: " + sql.substring(0, Math.min(200, sql.length())) + "...");
+            
             try (PreparedStatement stmt = conn.prepareStatement(sql);
                  ResultSet rs = stmt.executeQuery()) {
                 
@@ -1080,6 +1083,8 @@ public class GigSystem {
                     results.add(row);
                 }
                 
+                System.out.println("DEBUG Task6: SQL returned " + results.size() + " rows from database");
+                
                 // Convert to 2D array
                 if (results.isEmpty()) {
                     return new String[0][3];
@@ -1089,6 +1094,19 @@ public class GigSystem {
                 for (int i = 0; i < results.size(); i++) {
                     result[i] = results.get(i);
                 }
+                
+                // Debug output
+                System.out.println("DEBUG Task6: Returned " + result.length + " rows");
+                for (int i = 0; i < Math.min(result.length, 25); i++) {
+                    System.out.println("DEBUG Task6[" + i + "]: " + 
+                        (result[i][0] != null ? result[i][0] : "null") + " | " + 
+                        (result[i][1] != null ? result[i][1] : "null") + " | " + 
+                        (result[i][2] != null ? result[i][2] : "null"));
+                }
+                if (result.length > 25) {
+                    System.out.println("DEBUG Task6: ... (showing first 25 of " + result.length + " rows)");
+                }
+                
                 return result;
             }
         } catch (SQLException e) {
@@ -1143,6 +1161,9 @@ public class GigSystem {
                 "    aha.actname ASC," +
                 "    ct.ticket_count DESC NULLS LAST";
             
+            // Debug: Print SQL query
+            System.out.println("DEBUG Task7 SQL: " + sql.substring(0, Math.min(200, sql.length())) + "...");
+            
             try (PreparedStatement stmt = conn.prepareStatement(sql);
                  ResultSet rs = stmt.executeQuery()) {
                 
@@ -1155,6 +1176,8 @@ public class GigSystem {
                     results.add(row);
                 }
                 
+                System.out.println("DEBUG Task7: SQL returned " + results.size() + " rows from database");
+                
                 // Convert to 2D array
                 if (results.isEmpty()) {
                     return new String[0][2];
@@ -1164,6 +1187,15 @@ public class GigSystem {
                 for (int i = 0; i < results.size(); i++) {
                     result[i] = results.get(i);
                 }
+                
+                // Debug output
+                System.out.println("DEBUG Task7: Returned " + result.length + " rows");
+                for (int i = 0; i < result.length; i++) {
+                    System.out.println("DEBUG Task7[" + i + "]: " + 
+                        (result[i][0] != null ? result[i][0] : "null") + " | " + 
+                        (result[i][1] != null ? result[i][1] : "null"));
+                }
+                
                 return result;
             }
         } catch (SQLException e) {
