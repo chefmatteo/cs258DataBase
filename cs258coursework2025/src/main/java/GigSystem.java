@@ -1123,7 +1123,7 @@ public class GigSystem {
                 "    SELECT DISTINCT actname " +
                 "    FROM headline_acts" +
                 ") " +
-                "SELECT aha.actname, COALESCE(ct.customername, '[None]') as customername " +
+                "SELECT aha.actname, COALESCE(ct.customername, '[None]') as customername, ct.ticket_count " +
                 "FROM all_headline_acts aha " +
                 "LEFT JOIN customer_tickets ct ON aha.actname = ct.actname " +
                 "ORDER BY aha.actname ASC, ct.ticket_count DESC NULLS LAST";
