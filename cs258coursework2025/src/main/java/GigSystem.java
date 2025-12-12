@@ -1044,24 +1044,28 @@ public class GigSystem {
                 "    FROM tickets_per_year" +
                 "    GROUP BY actname" +
                 ")" +
-                "SELECT " +
-                "    tpy.actname," +
-                "    tpy.year::TEXT as year," +
-                "    tpy.tickets_sold::TEXT as tickets_sold," +
-                "    at.total_tickets" +
-                "FROM tickets_per_year tpy" +
-                "JOIN act_totals at ON tpy.actname = at.actname" +
-                "UNION ALL" +
-                "SELECT " +
-                "    at.actname," +
-                "    'Total' as year," +
-                "    at.total_tickets::TEXT as tickets_sold," +
-                "    at.total_tickets" +
-                "FROM act_totals at" +
+                "SELECT combined.actname, combined.year, combined.tickets_sold " +
+                "FROM (" +
+                "    SELECT " +
+                "        tpy.actname," +
+                "        tpy.year::TEXT as year," +
+                "        tpy.tickets_sold::TEXT as tickets_sold," +
+                "        at.total_tickets" +
+                "    FROM tickets_per_year tpy" +
+                "    JOIN act_totals at ON tpy.actname = at.actname" +
+                "    UNION ALL" +
+                "    SELECT " +
+                "        at.actname," +
+                "        'Total' as year," +
+                "        at.total_tickets::TEXT as tickets_sold," +
+                "        at.total_tickets" +
+                "    FROM act_totals at" +
+                ") combined " +
                 "ORDER BY " +
-                "    total_tickets ASC," +
-                "    CASE WHEN year = 'Total' THEN 1 ELSE 0 END," +
-                "    year ASC";
+                "    combined.total_tickets ASC," +
+                "    combined.actname ASC," +
+                "    CASE WHEN combined.year = 'Total' THEN 1 ELSE 0 END," +
+                "    CASE WHEN combined.year = 'Total' THEN NULL ELSE combined.year::INTEGER END ASC NULLS LAST";
             
             try (PreparedStatement stmt = conn.prepareStatement(sql);
                  ResultSet rs = stmt.executeQuery()) {
@@ -1094,7 +1098,78 @@ public class GigSystem {
     }
 
     public static String[][] task7(Connection conn){
-        return null;
+        try {
+            // SQL query to find regular customers for headline acts
+            // Shows each act who has performed as headline act along with customers who attended
+            // Acts ordered alphabetically, customers ordered by ticket count (most first)
+            String sql = 
+                "WITH headline_acts AS (" +
+                "    -- Find headline act for each non-cancelled gig" +
+                "    SELECT DISTINCT" +
+                "        ag.gigid," +
+                "        ag.actid," +
+                "        a.actname" +
+                "    FROM ACT_GIG ag" +
+                "    JOIN ACT a ON ag.actid = a.actid" +
+                "    JOIN GIG g ON ag.gigid = g.gigid" +
+                "    WHERE g.gigstatus = 'G'" +
+                "      AND (ag.ontime + (ag.duration || ' minutes')::INTERVAL) = (" +
+                "          SELECT MAX(ag2.ontime + (ag2.duration || ' minutes')::INTERVAL)" +
+                "          FROM ACT_GIG ag2" +
+                "          WHERE ag2.gigid = ag.gigid" +
+                "      )" +
+                ")," +
+                "customer_tickets AS (" +
+                "    -- Count tickets per customer per act" +
+                "    SELECT " +
+                "        ha.actname," +
+                "        t.customername," +
+                "        COUNT(*) as ticket_count" +
+                "    FROM headline_acts ha" +
+                "    JOIN TICKET t ON ha.gigid = t.gigid" +
+                "    GROUP BY ha.actname, t.customername" +
+                ")," +
+                "all_headline_acts AS (" +
+                "    -- Get all distinct headline acts" +
+                "    SELECT DISTINCT actname" +
+                "    FROM headline_acts" +
+                ")" +
+                "SELECT " +
+                "    aha.actname," +
+                "    COALESCE(ct.customername, '[None]') as customername" +
+                "FROM all_headline_acts aha" +
+                "LEFT JOIN customer_tickets ct ON aha.actname = ct.actname" +
+                "ORDER BY " +
+                "    aha.actname ASC," +
+                "    ct.ticket_count DESC NULLS LAST";
+            
+            try (PreparedStatement stmt = conn.prepareStatement(sql);
+                 ResultSet rs = stmt.executeQuery()) {
+                
+                // Collect results in a list
+                List<String[]> results = new ArrayList<>();
+                while (rs.next()) {
+                    String[] row = new String[2];
+                    row[0] = rs.getString("actname");
+                    row[1] = rs.getString("customername");
+                    results.add(row);
+                }
+                
+                // Convert to 2D array
+                if (results.isEmpty()) {
+                    return new String[0][2];
+                }
+                
+                String[][] result = new String[results.size()][2];
+                for (int i = 0; i < results.size(); i++) {
+                    result[i] = results.get(i);
+                }
+                return result;
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+            return null;
+        }
     }
 
     public static String[][] task8(Connection conn){
