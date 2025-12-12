@@ -1178,7 +1178,83 @@ public class GigSystem {
     }
 
     public static String[][] task8(Connection conn){
-        return null;
+        try {
+            // SQL query to find economically feasible venue-act combinations
+            // Uses CTEs to:
+            // 1. Calculate average ticket price from all non-cancelled gigs
+            // 2. Generate all venue-act combinations
+            // 3. Calculate total costs and tickets required
+            // 4. Filter economically feasible combinations
+            String sql = 
+                "WITH average_ticket_price AS (" +
+                "    SELECT ROUND(AVG(t.cost))::INTEGER as avg_price " +
+                "    FROM TICKET t " +
+                "    JOIN GIG g ON t.gigid = g.gigid " +
+                "    WHERE g.gigstatus = 'G'" +
+                "), " +
+                "venue_act_combinations AS (" +
+                "    SELECT v.venuename, a.actname, a.standardfee, v.hirecost " +
+                "    FROM VENUE v " +
+                "    CROSS JOIN ACT a" +
+                "), " +
+                "total_costs AS (" +
+                "    SELECT " +
+                "        vac.venuename, " +
+                "        vac.actname, " +
+                "        vac.standardfee + vac.hirecost as total_cost, " +
+                "        atp.avg_price " +
+                "    FROM venue_act_combinations vac " +
+                "    CROSS JOIN average_ticket_price atp" +
+                "), " +
+                "tickets_required AS (" +
+                "    SELECT " +
+                "        venuename, " +
+                "        actname, " +
+                "        CASE " +
+                "            WHEN avg_price > 0 THEN CEIL(total_cost::NUMERIC / avg_price)::INTEGER " +
+                "            ELSE NULL " +
+                "        END as tickets_needed, " +
+                "        total_cost, " +
+                "        avg_price " +
+                "    FROM total_costs" +
+                ") " +
+                "SELECT " +
+                "    venuename, " +
+                "    actname, " +
+                "    tickets_needed::TEXT as tickets_required " +
+                "FROM tickets_required " +
+                "WHERE tickets_needed IS NOT NULL " +
+                "  AND avg_price * tickets_needed >= total_cost " +
+                "ORDER BY venuename ASC, tickets_needed DESC";
+            
+            try (PreparedStatement stmt = conn.prepareStatement(sql);
+                 ResultSet rs = stmt.executeQuery()) {
+                
+                // Collect results in a list
+                List<String[]> results = new ArrayList<>();
+                while (rs.next()) {
+                    String[] row = new String[3];
+                    row[0] = rs.getString("venuename");
+                    row[1] = rs.getString("actname");
+                    row[2] = rs.getString("tickets_required");
+                    results.add(row);
+                }
+                
+                // Convert to 2D array
+                if (results.isEmpty()) {
+                    return new String[0][3];
+                }
+                
+                String[][] result = new String[results.size()][3];
+                for (int i = 0; i < results.size(); i++) {
+                    result[i] = results.get(i);
+                }
+                return result;
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+            return null;
+        }
     }
 
     // Utility Methods
