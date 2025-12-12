@@ -1118,6 +1118,7 @@ public class GigSystem {
                 "    FROM headline_acts ha " +
                 "    JOIN TICKET t ON ha.gigid = t.gigid " +
                 "    GROUP BY ha.actname, t.customername" +
+                "    HAVING COUNT(*) >= 2" +
                 "), " +
                 "all_headline_acts AS (" +
                 "    SELECT DISTINCT actname " +
