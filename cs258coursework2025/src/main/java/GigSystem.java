@@ -1123,7 +1123,7 @@ public class GigSystem {
                 "    SELECT DISTINCT actname " +
                 "    FROM headline_acts" +
                 ") " +
-                "SELECT aha.actname, COALESCE(ct.customername, '[None]') as customername " +
+                "SELECT aha.actname, COALESCE(ct.customername, '[None]') as customername, ct.ticket_count " +
                 "FROM all_headline_acts aha " +
                 "LEFT JOIN customer_tickets ct ON aha.actname = ct.actname " +
                 "ORDER BY aha.actname ASC, ct.ticket_count DESC NULLS LAST";
@@ -1141,6 +1141,8 @@ public class GigSystem {
                     String[] row = new String[2];
                     row[0] = rs.getString("actname");
                     row[1] = rs.getString("customername");
+                    Integer ticketCount = rs.getObject("ticket_count") != null ? rs.getInt("ticket_count") : null;
+                    System.out.println("DEBUG Task7 DB row: " + row[0] + " | " + row[1] + " | tickets: " + ticketCount);
                     results.add(row);
                 }
                 
