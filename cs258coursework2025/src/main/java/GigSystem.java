@@ -1008,67 +1008,45 @@ public class GigSystem {
             // 3. Calculate totals per act
             String sql = 
                 "WITH headline_acts AS (" +
-                "    -- Find headline act for each non-cancelled gig" +
-                "    -- Headline act = act with latest end time (ontime + duration)" +
-                "    SELECT DISTINCT" +
-                "        ag.gigid," +
-                "        ag.actid," +
-                "        a.actname" +
-                "    FROM ACT_GIG ag" +
-                "    JOIN ACT a ON ag.actid = a.actid" +
-                "    JOIN GIG g ON ag.gigid = g.gigid" +
-                "    WHERE g.gigstatus = 'G'" +  // Only non-cancelled gigs
+                "    SELECT DISTINCT ag.gigid, ag.actid, a.actname " +
+                "    FROM ACT_GIG ag " +
+                "    JOIN ACT a ON ag.actid = a.actid " +
+                "    JOIN GIG g ON ag.gigid = g.gigid " +
+                "    WHERE g.gigstatus = 'G' " +
                 "      AND (ag.ontime + (ag.duration || ' minutes')::INTERVAL) = (" +
-                "          -- Subquery to find latest end time for this gig" +
-                "          SELECT MAX(ag2.ontime + (ag2.duration || ' minutes')::INTERVAL)" +
-                "          FROM ACT_GIG ag2" +
+                "          SELECT MAX(ag2.ontime + (ag2.duration || ' minutes')::INTERVAL) " +
+                "          FROM ACT_GIG ag2 " +
                 "          WHERE ag2.gigid = ag.gigid" +
                 "      )" +
-                ")," +
+                "), " +
                 "tickets_per_year AS (" +
-                "    -- Count tickets sold per act per year" +
-                "    SELECT " +
-                "        ha.actname," +
-                "        EXTRACT(YEAR FROM g.gigdatetime)::INTEGER as year," +
-                "        COUNT(*) as tickets_sold" +
-                "    FROM headline_acts ha" +
-                "    JOIN GIG g ON ha.gigid = g.gigid" +
-                "    JOIN TICKET t ON g.gigid = t.gigid" +
+                "    SELECT ha.actname, EXTRACT(YEAR FROM g.gigdatetime)::INTEGER as year, COUNT(*) as tickets_sold " +
+                "    FROM headline_acts ha " +
+                "    JOIN GIG g ON ha.gigid = g.gigid " +
+                "    JOIN TICKET t ON g.gigid = t.gigid " +
                 "    GROUP BY ha.actname, EXTRACT(YEAR FROM g.gigdatetime)" +
-                ")," +
+                "), " +
                 "act_totals AS (" +
-                "    -- Calculate total tickets per act" +
-                "    SELECT " +
-                "        actname," +
-                "        SUM(tickets_sold) as total_tickets" +
-                "    FROM tickets_per_year" +
+                "    SELECT actname, SUM(tickets_sold) as total_tickets " +
+                "    FROM tickets_per_year " +
                 "    GROUP BY actname" +
-                ")" +
+                ") " +
                 "SELECT combined.actname, combined.year, combined.tickets_sold " +
                 "FROM (" +
-                "    SELECT " +
-                "        tpy.actname," +
-                "        tpy.year::TEXT as year," +
-                "        tpy.tickets_sold::TEXT as tickets_sold," +
-                "        at.total_tickets" +
-                "    FROM tickets_per_year tpy" +
-                "    JOIN act_totals at ON tpy.actname = at.actname" +
-                "    UNION ALL" +
-                "    SELECT " +
-                "        at.actname," +
-                "        'Total' as year," +
-                "        at.total_tickets::TEXT as tickets_sold," +
-                "        at.total_tickets" +
+                "    SELECT tpy.actname, tpy.year::TEXT as year, tpy.tickets_sold::TEXT as tickets_sold, at.total_tickets " +
+                "    FROM tickets_per_year tpy " +
+                "    JOIN act_totals at ON tpy.actname = at.actname " +
+                "    UNION ALL " +
+                "    SELECT at.actname, 'Total' as year, at.total_tickets::TEXT as tickets_sold, at.total_tickets " +
                 "    FROM act_totals at" +
                 ") combined " +
-                "ORDER BY " +
-                "    combined.total_tickets ASC," +
-                "    combined.actname ASC," +
-                "    CASE WHEN combined.year = 'Total' THEN 1 ELSE 0 END," +
+                "ORDER BY combined.total_tickets ASC, combined.actname ASC, " +
+                "    CASE WHEN combined.year = 'Total' THEN 1 ELSE 0 END, " +
                 "    CASE WHEN combined.year = 'Total' THEN NULL ELSE combined.year::INTEGER END ASC NULLS LAST";
             
-            // Debug: Print SQL query
-            System.out.println("DEBUG Task6 SQL: " + sql.substring(0, Math.min(200, sql.length())) + "...");
+            // Debug: Print full SQL query
+            System.out.println("DEBUG Task6 SQL (full):");
+            System.out.println(sql);
             
             try (PreparedStatement stmt = conn.prepareStatement(sql);
                  ResultSet rs = stmt.executeQuery()) {
@@ -1110,6 +1088,8 @@ public class GigSystem {
                 return result;
             }
         } catch (SQLException e) {
+            System.err.println("DEBUG Task6 SQLException: " + e.getMessage());
+            System.err.println("SQL State: " + e.getSQLState());
             e.printStackTrace();
             return null;
         }
@@ -1122,47 +1102,35 @@ public class GigSystem {
             // Acts ordered alphabetically, customers ordered by ticket count (most first)
             String sql = 
                 "WITH headline_acts AS (" +
-                "    -- Find headline act for each non-cancelled gig" +
-                "    SELECT DISTINCT" +
-                "        ag.gigid," +
-                "        ag.actid," +
-                "        a.actname" +
-                "    FROM ACT_GIG ag" +
-                "    JOIN ACT a ON ag.actid = a.actid" +
-                "    JOIN GIG g ON ag.gigid = g.gigid" +
-                "    WHERE g.gigstatus = 'G'" +
+                "    SELECT DISTINCT ag.gigid, ag.actid, a.actname " +
+                "    FROM ACT_GIG ag " +
+                "    JOIN ACT a ON ag.actid = a.actid " +
+                "    JOIN GIG g ON ag.gigid = g.gigid " +
+                "    WHERE g.gigstatus = 'G' " +
                 "      AND (ag.ontime + (ag.duration || ' minutes')::INTERVAL) = (" +
-                "          SELECT MAX(ag2.ontime + (ag2.duration || ' minutes')::INTERVAL)" +
-                "          FROM ACT_GIG ag2" +
+                "          SELECT MAX(ag2.ontime + (ag2.duration || ' minutes')::INTERVAL) " +
+                "          FROM ACT_GIG ag2 " +
                 "          WHERE ag2.gigid = ag.gigid" +
                 "      )" +
-                ")," +
+                "), " +
                 "customer_tickets AS (" +
-                "    -- Count tickets per customer per act" +
-                "    SELECT " +
-                "        ha.actname," +
-                "        t.customername," +
-                "        COUNT(*) as ticket_count" +
-                "    FROM headline_acts ha" +
-                "    JOIN TICKET t ON ha.gigid = t.gigid" +
+                "    SELECT ha.actname, t.customername, COUNT(*) as ticket_count " +
+                "    FROM headline_acts ha " +
+                "    JOIN TICKET t ON ha.gigid = t.gigid " +
                 "    GROUP BY ha.actname, t.customername" +
-                ")," +
+                "), " +
                 "all_headline_acts AS (" +
-                "    -- Get all distinct headline acts" +
-                "    SELECT DISTINCT actname" +
+                "    SELECT DISTINCT actname " +
                 "    FROM headline_acts" +
-                ")" +
-                "SELECT " +
-                "    aha.actname," +
-                "    COALESCE(ct.customername, '[None]') as customername" +
-                "FROM all_headline_acts aha" +
-                "LEFT JOIN customer_tickets ct ON aha.actname = ct.actname" +
-                "ORDER BY " +
-                "    aha.actname ASC," +
-                "    ct.ticket_count DESC NULLS LAST";
+                ") " +
+                "SELECT aha.actname, COALESCE(ct.customername, '[None]') as customername " +
+                "FROM all_headline_acts aha " +
+                "LEFT JOIN customer_tickets ct ON aha.actname = ct.actname " +
+                "ORDER BY aha.actname ASC, ct.ticket_count DESC NULLS LAST";
             
-            // Debug: Print SQL query
-            System.out.println("DEBUG Task7 SQL: " + sql.substring(0, Math.min(200, sql.length())) + "...");
+            // Debug: Print full SQL query
+            System.out.println("DEBUG Task7 SQL (full):");
+            System.out.println(sql);
             
             try (PreparedStatement stmt = conn.prepareStatement(sql);
                  ResultSet rs = stmt.executeQuery()) {
@@ -1199,6 +1167,8 @@ public class GigSystem {
                 return result;
             }
         } catch (SQLException e) {
+            System.err.println("DEBUG Task7 SQLException: " + e.getMessage());
+            System.err.println("SQL State: " + e.getSQLState());
             e.printStackTrace();
             return null;
         }
