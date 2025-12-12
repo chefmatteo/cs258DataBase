@@ -1095,9 +1095,6 @@ public class GigSystem {
 
     public static String[][] task7(Connection conn){
         return null;
-        catch (SQLException e){
-
-        }
     }
 
     public static String[][] task8(Connection conn){
