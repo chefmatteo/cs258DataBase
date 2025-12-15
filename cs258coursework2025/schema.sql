@@ -351,7 +351,7 @@ DECLARE
     next_act_id INTEGER;
 BEGIN
     -- Find previous performance end time and act
-    SELECT MAX(ontime + (duration || ' minutes')::INTERVAL), actid INTO prev_end_time, prev_act_id
+    SELECT ontime + (duration || ' minutes')::INTERVAL, actid INTO prev_end_time, prev_act_id
     FROM ACT_GIG
     WHERE gigid = NEW.gigid
       AND ontime < NEW.ontime
@@ -360,7 +360,7 @@ BEGIN
     LIMIT 1;
     
     -- Find next performance start time and act
-    SELECT MIN(ontime), actid INTO next_start_time, next_act_id
+    SELECT ontime, actid INTO next_start_time, next_act_id
     FROM ACT_GIG
     WHERE gigid = NEW.gigid
       AND ontime > NEW.ontime
@@ -526,25 +526,47 @@ RETURNS TRIGGER AS $$
 DECLARE
     gig_start_time TIMESTAMP;
     final_act_end_time TIMESTAMP;
+    new_act_end_time TIMESTAMP;
     duration_minutes NUMERIC;
+    existing_act_count INTEGER;
 BEGIN
     SELECT gigdatetime INTO gig_start_time
     FROM GIG
     WHERE gigid = NEW.gigid;
     
-    -- Find the latest act end time for this gig
+    -- Calculate the end time of the act being inserted/updated
+    new_act_end_time := NEW.ontime + (NEW.duration || ' minutes')::INTERVAL;
+    
+    -- Count existing acts (excluding the one being updated, if UPDATE)
+    SELECT COUNT(*) INTO existing_act_count
+    FROM ACT_GIG
+    WHERE gigid = NEW.gigid
+      AND (TG_OP = 'INSERT' OR (actid, gigid, ontime) != (OLD.actid, OLD.gigid, OLD.ontime));
+    
+    -- Find the latest act end time for existing acts in this gig
     SELECT MAX(ontime + (duration || ' minutes')::INTERVAL) INTO final_act_end_time
     FROM ACT_GIG
     WHERE gigid = NEW.gigid
       AND (TG_OP = 'INSERT' OR (actid, gigid, ontime) != (OLD.actid, OLD.gigid, OLD.ontime));
     
-    -- If this is the final act (or will be after update), check duration
-    IF final_act_end_time IS NULL OR (NEW.ontime + (NEW.duration || ' minutes')::INTERVAL) >= final_act_end_time THEN
-        duration_minutes := EXTRACT(EPOCH FROM ((NEW.ontime + (NEW.duration || ' minutes')::INTERVAL) - gig_start_time)) / 60;
+    -- Only validate duration if this act's end time >= all existing acts' end times
+    -- This means this act is (or will be) the final act
+    -- 
+    -- Strategy:
+    -- 1. If there are existing acts AND this act's end time >= all existing acts' end times,
+    --    then this is the final act, so validate it
+    -- 2. If this is the first act (existing_act_count = 0), we can't know if it's the final act yet.
+    --    However, the Java code in task2 validates this rule after all inserts are done (line 677-684),
+    --    so we can skip validation here for the first act to avoid false positives.
+    --    The Java validation will catch single-act gigs that don't meet the 60-minute requirement.
+    IF existing_act_count > 0 AND final_act_end_time IS NOT NULL AND new_act_end_time >= final_act_end_time THEN
+        -- This act's end time is >= all existing acts, so it's the final act, validate it
+        duration_minutes := EXTRACT(EPOCH FROM (new_act_end_time - gig_start_time)) / 60;
         IF duration_minutes < 60 THEN
             RAISE EXCEPTION 'Final act must finish at least 60 minutes after gig start, but only % minutes', duration_minutes;
         END IF;
     END IF;
+    -- If this is the first act or not the final act, skip validation (Java code will validate after all inserts)
     
     RETURN NEW;
 END;
