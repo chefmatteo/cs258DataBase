@@ -24,8 +24,8 @@ public class GigSystem {
     public static void main(String[] args) {
 
         // You should only need to fetch the connection details once
-        // You might need to change this to either getSocketConnection() or getPortConnection() - see below
-        Connection conn = getSocketConnection();
+        // Automatically tries socket connection first, falls back to port connection
+        Connection conn = getConnection();
 
         boolean repeatMenu = true;
 
@@ -1293,9 +1293,13 @@ public class GigSystem {
         Connection conn;
         try{
           conn = DriverManager.getConnection("jdbc:postgresql://localhost/cwk", props);
-          return conn;
+          // Test the connection is valid
+          if (conn != null && !conn.isClosed()) {
+              return conn;
+          }
         }catch(Exception e){
-            e.printStackTrace();
+            // Socket connection failed, return null to trigger fallback
+            // Don't print stack trace here - it's expected in local environment
         }
         return null;
     }
@@ -1306,6 +1310,7 @@ public class GigSystem {
      */
     public static Connection getPortConnection() {
         
+        // Try with postgres user first (for standard setup)
         String user = "postgres";
         String passwrd = "password";
         Connection conn;
@@ -1316,15 +1321,52 @@ public class GigSystem {
             System.out.println("Driver could not be loaded");
         }
 
+        // Try with postgres user and password
         try {
             conn = DriverManager.getConnection("jdbc:postgresql://127.0.0.1:5432/cwk?user="+ user +"&password=" + passwrd);
-            return conn;
+            if (conn != null && !conn.isClosed()) {
+                return conn;
+            }
         } catch(SQLException e) {
-            System.err.format("SQL State: %s\n%s\n", e.getSQLState(), e.getMessage());
-            e.printStackTrace();
-            System.out.println("Error retrieving connection");
-            return null;
+            // Try with current system user (for local PostgreSQL with peer authentication)
+            String currentUser = System.getProperty("user.name");
+            try {
+                // Try without password (peer authentication)
+                conn = DriverManager.getConnection("jdbc:postgresql://127.0.0.1:5432/cwk?user=" + currentUser);
+                if (conn != null && !conn.isClosed()) {
+                    return conn;
+                }
+            } catch(SQLException e2) {
+                // Try with empty password
+                try {
+                    conn = DriverManager.getConnection("jdbc:postgresql://127.0.0.1:5432/cwk?user=" + currentUser + "&password=");
+                    if (conn != null && !conn.isClosed()) {
+                        return conn;
+                    }
+                } catch(SQLException e3) {
+                    System.err.format("SQL State: %s\n%s\n", e3.getSQLState(), e3.getMessage());
+                    e3.printStackTrace();
+                    System.out.println("Error retrieving connection with all methods");
+                }
+            }
         }
+        return null;
+    }
+
+    /**
+     * Gets the connection to the database, trying socket connection first, then port connection as fallback
+     * @return A JDBC Connection object
+     */
+    public static Connection getConnection() {
+        // Try socket connection first (for university server)
+        Connection conn = getSocketConnection();
+        if (conn != null) {
+            return conn;
+        }
+        
+        // Fall back to port connection (for local environment)
+        System.out.println("Socket connection failed, trying port connection...");
+        return getPortConnection();
     }
 
     /**

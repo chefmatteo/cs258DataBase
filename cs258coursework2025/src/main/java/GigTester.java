@@ -73,7 +73,7 @@ public class GigTester {
     }
 
     public static boolean testTask1(){
-        String[][] out = GigSystem.task1(GigSystem.getSocketConnection(),11);
+        String[][] out = GigSystem.task1(GigSystem.getConnection(),11);
         String[] gigacts = {"ViewBee 40", "The Where", "The Selecter"};
         String[] ontime = {"18:00", "19:00", "20:25"};
         String[] offtime = {"18:50","20:10", "21:25"};
@@ -98,7 +98,7 @@ public class GigTester {
     }
     
     public static boolean testTask2(){
-        Connection conn = GigSystem.getSocketConnection();
+        Connection conn = GigSystem.getConnection();
         if (conn == null) {
             System.err.println("Failed to get database connection");
             return false;
@@ -309,7 +309,7 @@ public class GigTester {
 
     //This method isn't called by anywhere - you can adapt it if you like
     public static boolean testTask2Invalid(){
-        Connection conn = GigSystem.getSocketConnection();
+        Connection conn = GigSystem.getConnection();
         if (conn == null) {
             System.err.println("Failed to get database connection");
             return false;
@@ -374,7 +374,7 @@ public class GigTester {
     }
 
     public static boolean testTask3(){
-        Connection conn = GigSystem.getSocketConnection();
+        Connection conn = GigSystem.getConnection();
         if (conn == null) {
             System.err.println("Failed to get database connection");
             return false;
@@ -508,7 +508,7 @@ public class GigTester {
 
     // Test Task 3 with invalid information
     public static boolean testTask3Invalid(){
-        Connection conn = GigSystem.getSocketConnection();
+        Connection conn = GigSystem.getConnection();
         if (conn == null) {
             System.err.println("Failed to get database connection");
             return false;
@@ -726,7 +726,7 @@ public class GigTester {
     }
 
     public static boolean testTask4(){
-        Connection conn = GigSystem.getSocketConnection();
+        Connection conn = GigSystem.getConnection();
         if (conn == null) {
             System.err.println("Failed to get database connection");
             return false;
@@ -935,7 +935,7 @@ public class GigTester {
     }
 
     public static boolean testTask5(){
-        Connection conn = GigSystem.getSocketConnection();
+        Connection conn = GigSystem.getConnection();
         if (conn == null) {
             System.err.println("Failed to get database connection");
             return false;
@@ -1071,7 +1071,7 @@ public class GigTester {
     }
 
     public static boolean testTask6(){
-        Connection conn = GigSystem.getSocketConnection();
+        Connection conn = GigSystem.getConnection();
         if (conn == null) {
             System.err.println("Failed to get database connection");
             return false;
@@ -1419,7 +1419,7 @@ public class GigTester {
 
     public static boolean testTask7(){
         //In the test data the solution is...
-        String[][] out = GigSystem.task7(GigSystem.getSocketConnection());
+        String[][] out = GigSystem.task7(GigSystem.getConnection());
         String[] acts = {"Join Division","QLS","Scalar Swift","Scalar Swift"};
         String[] customers = {"G Jones","[None]","G Jones", "J Smith"};
         try {
@@ -1441,7 +1441,7 @@ public class GigTester {
     }
 
     public static boolean testTask8(){
-        Connection conn = GigSystem.getSocketConnection();
+        Connection conn = GigSystem.getConnection();
         if (conn == null) {
             System.err.println("Failed to get database connection");
             return false;
