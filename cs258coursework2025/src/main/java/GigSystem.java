@@ -1090,8 +1090,8 @@ public class GigSystem {
         } catch (SQLException e) {
             System.err.println("DEBUG Task6 SQLException: " + e.getMessage());
             System.err.println("SQL State: " + e.getSQLState());
-            e.printStackTrace();
-            return null;
+            e.printStackTrace(); 
+            return null; 
         }
     }
 
@@ -1173,7 +1173,7 @@ public class GigSystem {
             System.err.println("DEBUG Task7 SQLException: " + e.getMessage());
             System.err.println("SQL State: " + e.getSQLState());
             e.printStackTrace();
-            return null;
+        return null;
         }
     }
 
@@ -1253,7 +1253,7 @@ public class GigSystem {
             }
         } catch (SQLException e) {
             e.printStackTrace();
-            return null;
+        return null;
         }
     }
 
@@ -1295,7 +1295,7 @@ public class GigSystem {
           conn = DriverManager.getConnection("jdbc:postgresql://localhost/cwk", props);
           // Test the connection is valid
           if (conn != null && !conn.isClosed()) {
-              return conn;
+          return conn;
           }
         }catch(Exception e){
             // Socket connection failed, return null to trigger fallback
@@ -1325,7 +1325,7 @@ public class GigSystem {
         try {
             conn = DriverManager.getConnection("jdbc:postgresql://127.0.0.1:5432/cwk?user="+ user +"&password=" + passwrd);
             if (conn != null && !conn.isClosed()) {
-                return conn;
+            return conn;
             }
         } catch(SQLException e) {
             // Try with current system user (for local PostgreSQL with peer authentication)
@@ -1350,8 +1350,8 @@ public class GigSystem {
                 }
             }
         }
-        return null;
-    }
+            return null;
+        }
 
     /**
      * Gets the connection to the database, trying socket connection first, then port connection as fallback

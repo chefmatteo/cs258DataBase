@@ -1,7 +1,7 @@
 -- Database Schema for GigSystem
 -- This schema creates all tables, sequences, and constraints needed for the coursework
 
--- Drop existing tables if they exist (for clean reset)
+-- for clean reset: 
 DROP TABLE IF EXISTS TICKET CASCADE;
 DROP TABLE IF EXISTS GIG_TICKET CASCADE;
 DROP TABLE IF EXISTS ACT_GIG CASCADE;
@@ -69,13 +69,11 @@ CREATE SEQUENCE act_actid_seq
 -- Set default value for actid to use sequence
 ALTER TABLE ACT ALTER COLUMN actid SET DEFAULT nextval('act_actid_seq');
 
--- ============================================
 -- VENUE Table
 -- Stores information about venues
--- ============================================
 CREATE TABLE VENUE (
     venueid INTEGER PRIMARY KEY,
-    venuename VARCHAR(255) NOT NULL,
+    venuename VARCHAR(100) NOT NULL,
     hirecost INTEGER NOT NULL CHECK (hirecost >= 0),
     capacity INTEGER NOT NULL CHECK (capacity > 0)
 );
@@ -351,7 +349,7 @@ DECLARE
     next_act_id INTEGER;
 BEGIN
     -- Find previous performance end time and act
-    SELECT ontime + (duration || ' minutes')::INTERVAL, actid INTO prev_end_time, prev_act_id
+    SELECT MAX(ontime + (duration || ' minutes')::INTERVAL), actid INTO prev_end_time, prev_act_id
     FROM ACT_GIG
     WHERE gigid = NEW.gigid
       AND ontime < NEW.ontime
@@ -360,7 +358,7 @@ BEGIN
     LIMIT 1;
     
     -- Find next performance start time and act
-    SELECT ontime, actid INTO next_start_time, next_act_id
+    SELECT MIN(ontime), actid INTO next_start_time, next_act_id
     FROM ACT_GIG
     WHERE gigid = NEW.gigid
       AND ontime > NEW.ontime
@@ -526,47 +524,25 @@ RETURNS TRIGGER AS $$
 DECLARE
     gig_start_time TIMESTAMP;
     final_act_end_time TIMESTAMP;
-    new_act_end_time TIMESTAMP;
     duration_minutes NUMERIC;
-    existing_act_count INTEGER;
 BEGIN
     SELECT gigdatetime INTO gig_start_time
     FROM GIG
     WHERE gigid = NEW.gigid;
     
-    -- Calculate the end time of the act being inserted/updated
-    new_act_end_time := NEW.ontime + (NEW.duration || ' minutes')::INTERVAL;
-    
-    -- Count existing acts (excluding the one being updated, if UPDATE)
-    SELECT COUNT(*) INTO existing_act_count
-    FROM ACT_GIG
-    WHERE gigid = NEW.gigid
-      AND (TG_OP = 'INSERT' OR (actid, gigid, ontime) != (OLD.actid, OLD.gigid, OLD.ontime));
-    
-    -- Find the latest act end time for existing acts in this gig
+    -- Find the latest act end time for this gig
     SELECT MAX(ontime + (duration || ' minutes')::INTERVAL) INTO final_act_end_time
     FROM ACT_GIG
     WHERE gigid = NEW.gigid
       AND (TG_OP = 'INSERT' OR (actid, gigid, ontime) != (OLD.actid, OLD.gigid, OLD.ontime));
     
-    -- Only validate duration if this act's end time >= all existing acts' end times
-    -- This means this act is (or will be) the final act
-    -- 
-    -- Strategy:
-    -- 1. If there are existing acts AND this act's end time >= all existing acts' end times,
-    --    then this is the final act, so validate it
-    -- 2. If this is the first act (existing_act_count = 0), we can't know if it's the final act yet.
-    --    However, the Java code in task2 validates this rule after all inserts are done (line 677-684),
-    --    so we can skip validation here for the first act to avoid false positives.
-    --    The Java validation will catch single-act gigs that don't meet the 60-minute requirement.
-    IF existing_act_count > 0 AND final_act_end_time IS NOT NULL AND new_act_end_time >= final_act_end_time THEN
-        -- This act's end time is >= all existing acts, so it's the final act, validate it
-        duration_minutes := EXTRACT(EPOCH FROM (new_act_end_time - gig_start_time)) / 60;
+    -- If this is the final act (or will be after update), check duration
+    IF final_act_end_time IS NULL OR (NEW.ontime + (NEW.duration || ' minutes')::INTERVAL) >= final_act_end_time THEN
+        duration_minutes := EXTRACT(EPOCH FROM ((NEW.ontime + (NEW.duration || ' minutes')::INTERVAL) - gig_start_time)) / 60;
         IF duration_minutes < 60 THEN
             RAISE EXCEPTION 'Final act must finish at least 60 minutes after gig start, but only % minutes', duration_minutes;
         END IF;
     END IF;
-    -- If this is the first act or not the final act, skip validation (Java code will validate after all inserts)
     
     RETURN NEW;
 END;
@@ -678,20 +654,32 @@ CREATE OR REPLACE FUNCTION validate_ticket_cost()
 RETURNS TRIGGER AS $$
 DECLARE
     expected_price INTEGER;
+    gig_status CHAR(1);
 BEGIN
     SELECT price INTO expected_price
     FROM GIG_TICKET
     WHERE gigid = NEW.gigid AND pricetype = NEW.pricetype;
-    
+
     IF expected_price IS NULL THEN
         RAISE EXCEPTION 'No price defined for gig % and pricetype %', NEW.gigid, NEW.pricetype;
     END IF;
-    
+
+    -- Check if the gig is cancelled - if so, allow cost = 0
+    SELECT gigstatus INTO gig_status
+    FROM GIG
+    WHERE gigid = NEW.gigid;
+
+    IF gig_status = 'C' AND NEW.cost = 0 THEN
+        -- Allow cost = 0 for cancelled gigs
+        RETURN NEW;
+    END IF;
+
+    -- For active gigs, cost must match expected price
     IF NEW.cost != expected_price THEN
-        RAISE EXCEPTION 'Ticket cost (%) does not match expected price (%) for gig % and pricetype %', 
+        RAISE EXCEPTION 'Ticket cost (%) does not match expected price (%) for gig % and pricetype %',
             NEW.cost, expected_price, NEW.gigid, NEW.pricetype;
     END IF;
-    
+
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
