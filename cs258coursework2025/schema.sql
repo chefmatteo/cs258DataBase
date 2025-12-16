@@ -133,7 +133,7 @@ CREATE TABLE ACT_GIG (
 
 -- GIG_TICKET Table
 -- Stores ticket pricing information for each gig
--- ============================================
+
 CREATE TABLE GIG_TICKET (
     gigid INTEGER NOT NULL,
     pricetype CHAR(1) NOT NULL, -- 'A' = Adult, etc.
@@ -142,15 +142,13 @@ CREATE TABLE GIG_TICKET (
     FOREIGN KEY (gigid) REFERENCES GIG(gigid) ON DELETE CASCADE
 );
 
--- ============================================
 -- TICKET Table
 -- Stores individual ticket purchases
--- ============================================
 CREATE TABLE TICKET (
     ticketid INTEGER PRIMARY KEY,
     gigid INTEGER NOT NULL,
-    customername VARCHAR(255) NOT NULL,
-    customeremail VARCHAR(255) NOT NULL,
+    customername VARCHAR(100) NOT NULL,
+    customeremail VARCHAR(100) NOT NULL,
     pricetype CHAR(1) NOT NULL,
     cost INTEGER NOT NULL CHECK (cost >= 0),
     FOREIGN KEY (gigid) REFERENCES GIG(gigid) ON DELETE CASCADE,
@@ -168,9 +166,8 @@ CREATE SEQUENCE ticket_ticketid_seq
 
 ALTER TABLE TICKET ALTER COLUMN ticketid SET DEFAULT nextval('ticket_ticketid_seq');
 
--- ============================================
+
 -- Indexes for better query performance
--- ============================================
 -- Index on ACT_GIG for Task 1 queries (filtering by gigid and ordering by ontime)
 CREATE INDEX idx_act_gig_gigid_ontime ON ACT_GIG(gigid, ontime);
 
@@ -180,9 +177,8 @@ CREATE INDEX idx_gig_venueid ON GIG(venueid);
 -- Index on TICKET for gig lookups
 CREATE INDEX idx_ticket_gigid ON TICKET(gigid);
 
--- ============================================
+
 -- Functions and Triggers for Business Rules
--- ============================================
 
 -- Business Rule 11: First act must start at gigdatetime
 CREATE OR REPLACE FUNCTION validate_first_act_start()
