@@ -51,7 +51,6 @@ public class GigSystem {
              */
             switch(option){
                 case '1':
-                    // Task 1: View Gig Schedule
                     // Read gigID from user
                     String gigIDInput = readEntry("Enter gig ID: ");
                     try {
@@ -566,9 +565,6 @@ public class GigSystem {
     }
 
 
-    // Task Methods
-    // ============================================
-
     public static String[][] task1(Connection conn, int gigID){
         // SQL query to get act schedule for a specific gig
         // Joins ACT_GIG with ACT to get act names
@@ -595,7 +591,6 @@ public class GigSystem {
                      "ORDER BY ag.ontime ASC";
         
 
-        //resource management: 
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setInt(1, gigID);
             // Prepraed statement auto-closes the connection when the block ends
@@ -608,7 +603,6 @@ public class GigSystem {
             }
             
         } catch (SQLException e) {
-            // Debugging
             e.printStackTrace();
             // Return null on error (or could return empty array)
             return null;
@@ -636,14 +630,14 @@ public class GigSystem {
             originalAutoCommit = conn.getAutoCommit();
             conn.setAutoCommit(false);
             
-            // Step 1: Validate venue exists and get venueid
+            // Validate venue exists and get venueid
             int venueId = getVenueId(conn, venue);
             if (venueId == -1) {
                 conn.rollback();
                 return; // Venue not found
             }
             
-            // Step 2: Validate gig start time (Business Rule 15: 9am to 11:59pm)
+            // Validate gig start time (Business Rule 15: 9am to 11:59pm)
             int hour = gigStart.getHour();
             int minute = gigStart.getMinute();
             if (hour < 9 || hour > 23 || (hour == 23 && minute > 59)) {
@@ -651,10 +645,10 @@ public class GigSystem {
                 return; // Invalid gig start time
             }
             
-            // Step 3: Sort acts chronologically by onTime
+            // Sort acts chronologically by onTime
             Arrays.sort(actDetails, Comparator.comparing(ActPerformanceDetails::getOnTime));
             
-            // Step 4: Validate all acts exist and collect genres
+            // Validate all acts exist and collect genres
             Set<String> genres = new HashSet<>();
             for (ActPerformanceDetails act : actDetails) {
                 if (!actExists(conn, act.getActID())) {
@@ -668,13 +662,13 @@ public class GigSystem {
                 }
             }
             
-            // Step 5: Validate first act starts at gigStart (Business Rule 11)
+            // Validate first act starts at gigStart (Business Rule 11)
             if (!actDetails[0].getOnTime().equals(gigStart)) {
                 conn.rollback();
                 return; // First act must start at gig start time
             }
             
-            // Step 6: Validate final act finishes at least 60 mins after start (Business Rule 13)
+            // Validate final act finishes at least 60 mins after start (Business Rule 13)
             ActPerformanceDetails lastAct = actDetails[actDetails.length - 1];
             LocalDateTime lastActEnd = lastAct.getOnTime().plusMinutes(lastAct.getDuration());
             LocalDateTime gigStartPlus60 = gigStart.plusMinutes(60);
@@ -683,7 +677,7 @@ public class GigSystem {
                 return; // Final act must finish at least 60 minutes after gig start
             }
             
-            // Step 7: Validate gig finish time by genre (Business Rule 14)
+            // Validate gig finish time by genre (Business Rule 14)
             LocalDateTime maxFinishTime;
             boolean hasRockOrPop = genres.contains("rock") || genres.contains("pop");
             if (hasRockOrPop) {
@@ -698,7 +692,7 @@ public class GigSystem {
                 return; // Gig finish time violates genre-based rule
             }
             
-            // Step 8: Validate act fees are consistent per act per gig (Business Rule 4)
+            // Validate act fees are consistent per act per gig (Business Rule 4)
             Map<Integer, Integer> actFees = new HashMap<>();
             for (ActPerformanceDetails act : actDetails) {
                 int actId = act.getActID();
@@ -714,20 +708,20 @@ public class GigSystem {
                 }
             }
             
-            // Step 9: Insert GIG record
+            // Insert GIG record
             int gigId = insertGig(conn, venueId, gigTitle, gigStart);
             if (gigId == -1) {
                 conn.rollback();
                 return; // Failed to insert gig
             }
             
-            // Step 10: Insert ACT_GIG records (triggers will validate most business rules)
+            // Insert ACT_GIG records (triggers will validate most business rules)
             for (ActPerformanceDetails act : actDetails) {
                 insertActGig(conn, act.getActID(), gigId, act.getFee(), act.getOnTime(), act.getDuration());
                 // If insert fails, SQLException will be thrown and caught by outer try-catch
             }
             
-            // Step 11: Insert GIG_TICKET record for adult tickets
+            // Insert GIG_TICKET record for adult tickets
             if (!insertGigTicket(conn, gigId, 'A', adultTicketPrice)) {
                 conn.rollback();
                 return; // Failed to insert ticket pricing
@@ -772,20 +766,20 @@ public class GigSystem {
             originalAutoCommit = conn.getAutoCommit();
             conn.setAutoCommit(false);
             
-            // Step 1: Validate gig exists and is not cancelled
+            // Validate gig exists and is not cancelled
             if (!gigExistsAndActive(conn, gigid)) {
                 conn.rollback();
                 return; // Gig does not exist or is cancelled
             }
             
-            // Step 2: Validate ticketType exists in GIG_TICKET for this gig
+            // Validate ticketType exists in GIG_TICKET for this gig
             Integer ticketPrice = getTicketPrice(conn, gigid, ticketType.charAt(0));
             if (ticketPrice == null) {
                 conn.rollback();
                 return; // Ticket type not available for this gig
             }
             
-            // Step 3: Insert TICKET record
+            // Insert TICKET record
             // Triggers will validate:
             // - Ticket cost matches GIG_TICKET price (Business Rule via trigger)
             // - Venue capacity is not exceeded (Business Rule 12 via trigger)
@@ -825,7 +819,7 @@ public class GigSystem {
             originalAutoCommit = conn.getAutoCommit();
             conn.setAutoCommit(false);
             
-            // Step 1: Validate gig exists
+            // Validate gig exists
             if (!gigExistsAndActive(conn, gigID)) {
                 // Check if gig exists but is cancelled
                 String checkGigSql = "SELECT 1 FROM GIG WHERE gigid = ?";
@@ -843,14 +837,14 @@ public class GigSystem {
                 return null;
             }
             
-            // Step 2: Get act ID by name
+            // Get act ID by name
             int actId = getActIdByName(conn, actName);
             if (actId == -1) {
                 conn.rollback();
                 return null; // Act not found
             }
             
-            // Step 3: Check if act has performances in this gig
+            // Check if act has performances in this gig
             String checkPerfSql = "SELECT COUNT(*) as count FROM ACT_GIG WHERE gigid = ? AND actid = ?";
             int performanceCount = 0;
             try (PreparedStatement stmt = conn.prepareStatement(checkPerfSql)) {
@@ -868,20 +862,20 @@ public class GigSystem {
                 return null; // Act has no performances in this gig
             }
             
-            // Step 4: Calculate total cancelled duration
+            // Calculate total cancelled duration
             int totalCancelledDuration = getTotalCancelledDuration(conn, gigID, actId);
             
-            // Step 5: Check if act is headline act (final or only act)
+            // Check if act is headline act (final or only act)
             boolean isHeadline = isHeadlineAct(conn, gigID, actId);
             
-            // Step 6: Check if cancellation would violate interval rules
+            // Check if cancellation would violate interval rules
             boolean wouldViolate = false;
             if (!isHeadline) {
                 // Only check interval violations if not headline (headline always cancels gig)
                 wouldViolate = wouldViolateIntervalRules(conn, gigID, actId, totalCancelledDuration);
             }
             
-            // Step 7: Decide action based on conditions
+            // Decide action based on conditions
             String[][] result;
             
             if (isHeadline || wouldViolate) {

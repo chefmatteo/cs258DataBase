@@ -497,6 +497,17 @@ public class GigTester {
             }
             
             System.out.println("Test passed: Ticket purchased successfully with correct details");
+            
+            // Clean up: Delete the test ticket to avoid affecting other tests (like Task 5)
+            String deleteSql = "DELETE FROM TICKET WHERE gigid = ? AND customername = ? AND customeremail = ?";
+            try (PreparedStatement stmt = conn.prepareStatement(deleteSql)) {
+                stmt.setInt(1, gigid);
+                stmt.setString(2, name);
+                stmt.setString(3, email);
+                stmt.executeUpdate();
+                System.out.println("DEBUG: Test ticket cleaned up successfully");
+            }
+            
             return true;
             
         } catch (SQLException e) {
@@ -895,6 +906,28 @@ public class GigTester {
                 }
                 
                 System.out.println("Test passed: Gig cancelled successfully, " + result.length + " customers affected");
+                
+                // Clean up: Restore gig status and ticket costs to avoid affecting other tests (like Task 5)
+                try (PreparedStatement stmt = conn.prepareStatement("UPDATE GIG SET gigstatus = 'G' WHERE gigid = ?")) {
+                    stmt.setInt(1, cancelGigID);
+                    stmt.executeUpdate();
+                }
+                for (Map.Entry<Integer, Integer> entry : ticketCostsBefore.entrySet()) {
+                    try (PreparedStatement stmt = conn.prepareStatement("UPDATE TICKET SET cost = ? WHERE ticketid = ?")) {
+                        stmt.setInt(1, entry.getValue());
+                        stmt.setInt(2, entry.getKey());
+                        stmt.executeUpdate();
+                    }
+                }
+                // Re-insert the act_gig record (it was deleted when cancelling the entire gig)
+                // For gig 40, Scalar Swift (actid=5) with fee 30000, ontime 2017-05-20 20:00:00, duration 75
+                try (PreparedStatement stmt = conn.prepareStatement(
+                        "INSERT INTO ACT_GIG (actid, gigid, actgigfee, ontime, duration) " +
+                        "VALUES (5, 40, 30000, '2017-05-20 20:00:00', 75) " +
+                        "ON CONFLICT DO NOTHING")) {
+                    stmt.executeUpdate();
+                }
+                System.out.println("DEBUG: Test cleanup completed - restored gig 40 state");
                 return true;
                 
             } else {
@@ -1099,8 +1132,8 @@ public class GigTester {
                 if (out[i] == null || out[i].length != 3) {
                     System.err.println("Test failed: Row " + i + " has invalid format (expected 3 columns, got " + 
                                       (out[i] == null ? "null" : out[i].length) + ")");
-                    return false;
-                }
+            return false;
+        }
                 
                 // Verify no null values
                 if (out[i][0] == null || out[i][1] == null || out[i][2] == null) {
@@ -1404,7 +1437,7 @@ public class GigTester {
             
             System.out.println("All tests passed! Task 6 implementation is correct.");
             System.out.println("Result summary: " + out.length + " rows, " + reportedTotals.size() + " acts");
-            return true;
+        return true;
             
         } catch (SQLException e) {
             System.err.println("Test failed with SQLException: " + e.getMessage());
@@ -1664,7 +1697,7 @@ public class GigTester {
                  ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
                     validActs.add(rs.getString("actname"));
-                }
+            }
             }
             
             for (int i = 0; i < out.length; i++) {
