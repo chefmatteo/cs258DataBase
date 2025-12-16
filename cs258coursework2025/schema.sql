@@ -57,7 +57,7 @@ CREATE TABLE ACT (
     standardfee INTEGER NOT NULL CHECK (standardfee >= 0)
 );
 
--- Sequence for ACT table (auto-increment actid)
+-- Sequence for ACT table (auto-increment actid, according to the business rule)
 CREATE SEQUENCE act_actid_seq
     START WITH 10001
     INCREMENT BY 1
@@ -69,7 +69,6 @@ CREATE SEQUENCE act_actid_seq
 ALTER TABLE ACT ALTER COLUMN actid SET DEFAULT nextval('act_actid_seq');
 
 -- VENUE Table
--- Stores information about venues
 CREATE TABLE VENUE (
     venueid INTEGER PRIMARY KEY,
     venuename VARCHAR(100) NOT NULL,
@@ -87,10 +86,10 @@ CREATE SEQUENCE venue_venueid_seq
 
 ALTER TABLE VENUE ALTER COLUMN venueid SET DEFAULT nextval('venue_venueid_seq');
 
--- ============================================
+
 -- GIG Table
 -- Stores information about gigs/concerts
--- ============================================
+
 CREATE TABLE GIG (
     gigid INTEGER PRIMARY KEY,
     venueid INTEGER NOT NULL,
@@ -348,16 +347,16 @@ DECLARE
     next_act_id INTEGER;
 BEGIN
     -- Find previous performance end time and act
-    SELECT MAX(ontime + (duration || ' minutes')::INTERVAL), actid INTO prev_end_time, prev_act_id
+    SELECT ontime + (duration || ' minutes')::INTERVAL, actid INTO prev_end_time, prev_act_id
     FROM ACT_GIG
     WHERE gigid = NEW.gigid
       AND ontime < NEW.ontime
       AND (TG_OP = 'INSERT' OR (actid, gigid, ontime) != (OLD.actid, OLD.gigid, OLD.ontime))
     ORDER BY ontime DESC
     LIMIT 1;
-    
+
     -- Find next performance start time and act
-    SELECT MIN(ontime), actid INTO next_start_time, next_act_id
+    SELECT ontime, actid INTO next_start_time, next_act_id
     FROM ACT_GIG
     WHERE gigid = NEW.gigid
       AND ontime > NEW.ontime
@@ -523,26 +522,42 @@ RETURNS TRIGGER AS $$
 DECLARE
     gig_start_time TIMESTAMP;
     final_act_end_time TIMESTAMP;
+    new_act_end_time TIMESTAMP;
     duration_minutes NUMERIC;
+    existing_act_count INTEGER;
 BEGIN
     SELECT gigdatetime INTO gig_start_time
     FROM GIG
     WHERE gigid = NEW.gigid;
-    
-    -- Find the latest act end time for this gig
+
+    -- Calculate the end time of the act being inserted/updated
+    new_act_end_time := NEW.ontime + (NEW.duration || ' minutes')::INTERVAL;
+
+    -- Count existing acts (excluding the one being updated, if UPDATE)
+    SELECT COUNT(*) INTO existing_act_count
+    FROM ACT_GIG
+    WHERE gigid = NEW.gigid
+      AND (TG_OP = 'INSERT' OR (actid, gigid, ontime) != (OLD.actid, OLD.gigid, OLD.ontime));
+
+    -- Find the latest act end time for existing acts in this gig
     SELECT MAX(ontime + (duration || ' minutes')::INTERVAL) INTO final_act_end_time
     FROM ACT_GIG
     WHERE gigid = NEW.gigid
       AND (TG_OP = 'INSERT' OR (actid, gigid, ontime) != (OLD.actid, OLD.gigid, OLD.ontime));
-    
-    -- If this is the final act (or will be after update), check duration
-    IF final_act_end_time IS NULL OR (NEW.ontime + (NEW.duration || ' minutes')::INTERVAL) >= final_act_end_time THEN
-        duration_minutes := EXTRACT(EPOCH FROM ((NEW.ontime + (NEW.duration || ' minutes')::INTERVAL) - gig_start_time)) / 60;
+
+    -- Only validate duration if this act's end time >= all existing acts' end times
+    -- This means this act is (or will be) the final act
+    -- If existing_act_count = 0, we can't know if this is the final act yet (more acts might be added)
+    -- So we skip validation for the first act and only validate when we're certain it's the final act
+    IF existing_act_count > 0 AND final_act_end_time IS NOT NULL AND new_act_end_time >= final_act_end_time THEN
+        -- This act's end time is >= all existing acts, so it's the final act, validate it
+        duration_minutes := EXTRACT(EPOCH FROM (new_act_end_time - gig_start_time)) / 60;
         IF duration_minutes < 60 THEN
             RAISE EXCEPTION 'Final act must finish at least 60 minutes after gig start, but only % minutes', duration_minutes;
         END IF;
     END IF;
-    
+    -- If this is the first act or not the final act, skip validation (Java code will validate after all inserts)
+
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
