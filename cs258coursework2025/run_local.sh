@@ -43,3 +43,4 @@ else
         mvn -e -q compile exec:java@test -Dexec.args="test $2"
     fi
 fi
+

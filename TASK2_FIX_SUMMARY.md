@@ -88,3 +88,4 @@ After fixes:
 2. **Validation timing** matters - we can't validate the first act as "final" until all acts are inserted
 3. **SQL aggregation rules** - can't mix aggregate functions with non-aggregated columns without GROUP BY
 4. **Defense in depth** - Java code validation provides a safety net for edge cases
+
