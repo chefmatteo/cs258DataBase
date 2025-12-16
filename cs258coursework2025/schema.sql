@@ -47,13 +47,12 @@ DROP FUNCTION IF EXISTS validate_final_act_duration() CASCADE;
 DROP FUNCTION IF EXISTS validate_gig_finish_time() CASCADE;
 DROP FUNCTION IF EXISTS validate_act_fee_per_gig() CASCADE;
 
--- ============================================
+
 -- ACT Table
 -- Stores information about musical acts
--- ============================================
 CREATE TABLE ACT (
     actid INTEGER PRIMARY KEY,
-    actname VARCHAR(255) NOT NULL,
+    actname VARCHAR(100) NOT NULL,
     genre VARCHAR(100),
     standardfee INTEGER NOT NULL CHECK (standardfee >= 0)
 );
