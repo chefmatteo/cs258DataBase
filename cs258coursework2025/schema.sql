@@ -93,11 +93,11 @@ ALTER TABLE VENUE ALTER COLUMN venueid SET DEFAULT nextval('venue_venueid_seq');
 CREATE TABLE GIG (
     gigid INTEGER PRIMARY KEY,
     venueid INTEGER NOT NULL,
-    gigtitle VARCHAR(255) NOT NULL,
+    gigtitle VARCHAR(100) NOT NULL,
     gigdatetime TIMESTAMP NOT NULL,
     gigstatus CHAR(1) NOT NULL CHECK (gigstatus IN ('G', 'C')), -- 'G' = Going ahead, 'C' = Cancelled
     FOREIGN KEY (venueid) REFERENCES VENUE(venueid) ON DELETE CASCADE,
-    -- Business Rule 15: Gigs start between 9am and 11:59pm
+    -- Following business Rule 15: Gigs start between 9am and 11:59pm
     CONSTRAINT gig_start_time_check CHECK (
         EXTRACT(HOUR FROM gigdatetime) >= 9 
         AND (EXTRACT(HOUR FROM gigdatetime) < 23 OR (EXTRACT(HOUR FROM gigdatetime) = 23 AND EXTRACT(MINUTE FROM gigdatetime) <= 59))
@@ -114,23 +114,23 @@ CREATE SEQUENCE gig_gigid_seq
 
 ALTER TABLE GIG ALTER COLUMN gigid SET DEFAULT nextval('gig_gigid_seq');
 
--- ============================================
+
 -- ACT_GIG Table
 -- Junction table linking acts to gigs
 -- Stores performance details for each act at each gig
--- ============================================
+
 CREATE TABLE ACT_GIG (
     actid INTEGER NOT NULL,
     gigid INTEGER NOT NULL,
     actgigfee INTEGER NOT NULL CHECK (actgigfee >= 0),
     ontime TIMESTAMP NOT NULL,
-    duration INTEGER NOT NULL CHECK (duration >= 15 AND duration <= 90), -- Business Rule 5: 15-90 minutes
+    duration INTEGER NOT NULL CHECK (duration >= 15 AND duration <= 90), -- Following Business Rule 5: 15-90 minutes
     PRIMARY KEY (actid, gigid, ontime), -- Composite primary key
     FOREIGN KEY (actid) REFERENCES ACT(actid) ON DELETE CASCADE,
     FOREIGN KEY (gigid) REFERENCES GIG(gigid) ON DELETE CASCADE
 );
 
--- ============================================
+
 -- GIG_TICKET Table
 -- Stores ticket pricing information for each gig
 -- ============================================

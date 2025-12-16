@@ -981,12 +981,12 @@ public class GigSystem {
                     row[1] = String.valueOf(rs.getInt("tickets_to_sell"));
                     results.add(row);
                 }
-                
+
                 // Convert to 2D array
                 if (results.isEmpty()) {
                     return new String[0][2];
                 }
-                
+
                 String[][] result = new String[results.size()][2];
                 for (int i = 0; i < results.size(); i++) {
                     result[i] = results.get(i);
